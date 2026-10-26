@@ -1,21 +1,16 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { drawNumberedBoxes } from "@/lib/media/annotate";
 import { extractAudio, extractKeyframes, loadVideo, type ExtractedAudio, type ExtractedFrame } from "@/lib/media/browser";
-import {
-  countAtThreshold,
-  filterDetections,
-  scoreMethods,
-  type AccuracyRow,
-  type DropReason,
-  type MethodScore,
-} from "@/lib/scan/accuracy";
-import { groupForCounting } from "@/lib/scan/grouping";
-import type { CountResult, IdentifyResult, PricesResult, Product } from "@/lib/scan/types";
+import { encodeTrackingClip, type TrackingClip } from "@/lib/media/clip";
+import { filterDetections, scoreMethods, type AccuracyRow, type DropReason, type MethodScore } from "@/lib/scan/accuracy";
+import { shapeGroups } from "@/lib/scan/grouping";
+import { filterTracks } from "@/lib/scan/tracks";
+import type { IdentifyResult, PricesResult, Product } from "@/lib/scan/types";
+import { countShape, postForm, samCount, type CountState, type TrackedCount } from "./counting";
 import { FrameOverlay } from "./FrameOverlay";
 
-type StepKey = "read" | "identify" | "prices" | "count";
+type StepKey = "read" | "identify" | "clip" | "prices" | "count";
 type StepStatus = "waiting" | "running" | "done" | "error" | "skipped";
 interface StepState {
   status: StepStatus;
@@ -23,51 +18,24 @@ interface StepState {
   ms?: number;
 }
 
-/** How a product's units were found: alone, or shared with look-alike products and sorted by Muse Spark. */
-interface Sharing {
-  products: number;
-  /** Units SAM found for the whole look-alike group. */
-  groupFound: number;
-  sortMs?: number;
-  sortError?: string;
-}
-
-type CountState =
-  | { state: "loading" }
-  | { state: "done"; result: CountResult; sharing: Sharing | null }
-  | { state: "error"; error: string };
-
-interface AssignResponse {
-  assignments: Record<string, number>;
-  model: string;
-  ms: number;
-}
-
-const MAX_SORT_LABELS = 80;
-
 const STEP_LABELS: Record<StepKey, string> = {
   read: "Reading the video on this phone",
   identify: "Finding products · Muse Spark",
+  clip: "Making a small tracking clip on this phone",
   prices: "Listening for prices · Voice Transcribe + Muse Spark",
-  count: "Counting each product · SAM 3.1 + Muse Spark",
+  count: "Following each unit through the video · SAM 3.1 + Muse Spark",
 };
 
 const INITIAL_STEPS: Record<StepKey, StepState> = {
   read: { status: "waiting" },
   identify: { status: "waiting" },
+  clip: { status: "waiting" },
   prices: { status: "waiting" },
   count: { status: "waiting" },
 };
 
 const SILENCE_LEVEL = 0.004;
 const COUNT_CONCURRENCY = 4;
-
-async function postForm<T>(url: string, form: FormData): Promise<T> {
-  const res = await fetch(url, { method: "POST", body: form });
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
-  return data;
-}
 
 function formatMs(ms?: number): string {
   if (ms === undefined) return "";
@@ -95,8 +63,11 @@ export function LabClient() {
   const [realCounts, setRealCounts] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
   const [fatal, setFatal] = useState<string | null>(null);
+  const [clipInfo, setClipInfo] = useState<Omit<TrackingClip, "blob"> & { bytes: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const runId = useRef(0);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const urlsRef = useRef<string[]>([]);
 
   const setStep = useCallback((key: StepKey, value: StepState) => {
     setSteps((prev) => ({ ...prev, [key]: value }));
@@ -105,6 +76,13 @@ export function LabClient() {
   const reset = useCallback(() => {
     runId.current++;
     frames.forEach((f) => URL.revokeObjectURL(f.url));
+    urlsRef.current.forEach((u) => URL.revokeObjectURL(u));
+    urlsRef.current = [];
+    if (videoRef.current) {
+      URL.revokeObjectURL(videoRef.current.src);
+      videoRef.current = null;
+    }
+    setClipInfo(null);
     setVideo(null);
     setSteps(INITIAL_STEPS);
     setFrames([]);
@@ -119,97 +97,41 @@ export function LabClient() {
   }, [frames]);
 
   const countProducts = useCallback(
-    async (products: Product[], extracted: ExtractedFrame[], id: number) => {
+    async (products: Product[], extracted: ExtractedFrame[], clip: TrackingClip | null, id: number) => {
       const started = Date.now();
-      const groups = groupForCounting(products);
-      setStep("count", { status: "running", note: `0 of ${groups.length} searches` });
+      const shapes = shapeGroups(products);
+      setStep("count", { status: "running", note: `0 of ${shapes.length} shapes` });
       setCounts(Object.fromEntries(products.map((_, i) => [i, { state: "loading" } as CountState])));
+      const ctx = { products, frames: extracted, clip, video: videoRef.current, urls: urlsRef.current };
       let finished = 0;
       let failed = 0;
-      const queue = [...groups];
+      const queue = [...shapes];
 
       const worker = async () => {
-        for (let group = queue.shift(); group; group = queue.shift()) {
-          const frame = extracted[group.frame] ?? extracted[0];
-          if (!frame) continue;
-          const updates: Record<number, CountState> = {};
+        for (let shape = queue.shift(); shape; shape = queue.shift()) {
+          let updates: Record<number, CountState>;
           try {
-            const form = new FormData();
-            form.append("frame", frame.blob, `frame-${frame.index}.jpg`);
-            form.append("concept", group.concept);
-            form.append("fallback", group.fallback);
-            form.append("productIndex", String(group.members[0] ?? -1));
-            form.append("frameIndex", String(frame.index));
-            const found = await postForm<CountResult>("/api/scan/count", form);
-
-            if (group.candidates.length === 1) {
-              const only = group.members[0] as number;
-              updates[only] = { state: "done", result: { ...found, productIndex: only }, sharing: null };
-            } else {
-              // Look-alike products share one SAM search; Muse Spark reads each numbered unit.
-              const labelled = [...found.detections]
-                .sort((a, b) => (b.confidence ?? 1) - (a.confidence ?? 1))
-                .slice(0, MAX_SORT_LABELS);
-              let byId = new Map<string, number>();
-              let sortMs: number | undefined;
-              let sortError: string | undefined;
-              if (labelled.length > 0) {
-                try {
-                  const annotated = await drawNumberedBoxes(frame.blob, labelled);
-                  const sortForm = new FormData();
-                  sortForm.append("image", annotated, "numbered.jpg");
-                  sortForm.append("labels", String(labelled.length));
-                  sortForm.append(
-                    "products",
-                    JSON.stringify(
-                      group.candidates.map((i) => ({
-                        index: i,
-                        name: products[i]?.name,
-                        brand: products[i]?.brand,
-                        appearance: products[i]?.appearance,
-                      })),
-                    ),
-                  );
-                  const sorted = await postForm<AssignResponse>("/api/scan/assign", sortForm);
-                  sortMs = sorted.ms;
-                  byId = new Map(labelled.map((d, k) => [d.id, sorted.assignments[String(k + 1)] ?? -1]));
-                } catch (error) {
-                  sortError = error instanceof Error ? error.message : "Sorting failed";
-                }
-              }
-              for (const member of group.members) {
-                updates[member] = {
-                  state: "done",
-                  result: {
-                    ...found,
-                    productIndex: member,
-                    detections: found.detections.filter((d) => byId.get(d.id) === member),
-                  },
-                  sharing: { products: group.candidates.length, groupFound: found.detections.length, sortMs, sortError },
-                };
-              }
-            }
+            updates = await countShape(shape, ctx);
           } catch (error) {
-            failed += group.members.length;
             const message = error instanceof Error ? error.message : "failed";
-            for (const member of group.members) updates[member] = { state: "error", error: message };
+            updates = Object.fromEntries(shape.candidates.map((i) => [i, { state: "error", error: message } as CountState]));
           }
           if (runId.current !== id) return;
+          failed += Object.values(updates).filter((u) => u.state === "error").length;
           finished++;
           setCounts((prev) => ({ ...prev, ...updates }));
-          setStep("count", { status: "running", note: `${finished} of ${groups.length} searches` });
+          setStep("count", { status: "running", note: `${finished} of ${shapes.length} shapes` });
         }
       };
 
-      await Promise.all(Array.from({ length: Math.min(COUNT_CONCURRENCY, groups.length) }, worker));
+      await Promise.all(Array.from({ length: Math.min(COUNT_CONCURRENCY, shapes.length) }, worker));
       if (runId.current !== id) return;
-      const shared = groups.filter((g) => g.candidates.length > 1).length;
       setStep("count", {
         status: failed === products.length && products.length > 0 ? "error" : "done",
         note:
           (failed ? `${failed} failed · ` : "") +
-          `${products.length} products, ${groups.length} SAM search${groups.length === 1 ? "" : "es"}` +
-          (shared ? ` · look-alikes sorted by Muse Spark` : ""),
+          `${products.length} products, ${shapes.length} shape${shapes.length === 1 ? "" : "s"}` +
+          (shapes.some((g) => g.candidates.length > 1) ? " · look-alikes sorted by Muse Spark" : ""),
         ms: Date.now() - started,
       });
     },
@@ -262,7 +184,7 @@ export function LabClient() {
         const extracted = await extractKeyframes(element, (done, total) =>
           setStep("read", { status: "running", note: `Picking sharp frames ${done}/${total}` }),
         );
-        URL.revokeObjectURL(element.src);
+        videoRef.current = element;
         setStep("read", { status: "running", note: "Extracting sound" });
         const sound = await extractAudio(file);
         if (runId.current !== id) return;
@@ -283,6 +205,34 @@ export function LabClient() {
         setStep("identify", { status: "running" });
         const form = new FormData();
         extracted.forEach((f) => form.append("frames", f.blob, `frame-${f.index}.jpg`));
+
+        // While Muse Spark looks at the frames, the phone makes the small clip SAM will track units in.
+        const clipStarted = Date.now();
+        setStep("clip", { status: "running" });
+        const clipJob = encodeTrackingClip(element, (done, total) =>
+          setStep("clip", { status: "running", note: `${done} of ${total} frames` }),
+        ).then(
+          (made) => {
+            if (runId.current !== id) return made;
+            if (made) {
+              const { blob, ...info } = made;
+              setClipInfo({ ...info, bytes: blob.size });
+              setStep("clip", {
+                status: "done",
+                note: `${info.frames} frames at ${info.fps} fps, ${info.width}×${info.height} · ${(blob.size / 1024 / 1024).toFixed(1)} MB`,
+                ms: Date.now() - clipStarted,
+              });
+            } else {
+              setStep("clip", { status: "skipped", note: "Not possible on this phone; counting on single frames instead" });
+            }
+            return made;
+          },
+          () => {
+            setStep("clip", { status: "skipped", note: "Not possible on this phone; counting on single frames instead" });
+            return null;
+          },
+        );
+
         const found = await postForm<IdentifyResult>("/api/scan/identify", form);
         if (runId.current !== id) return;
         setIdentify(found);
@@ -290,12 +240,12 @@ export function LabClient() {
 
         if (found.products.length === 0) {
           setStep("count", { status: "skipped", note: "Nothing to count" });
-          await listenForPrices(sound, found.products, id);
+          await Promise.all([listenForPrices(sound, found.products, id), clipJob]);
           return;
         }
         await Promise.all([
           listenForPrices(sound, found.products, id),
-          countProducts(found.products, extracted, id),
+          clipJob.then((clip) => countProducts(found.products, extracted, clip, id)),
         ]);
       } catch (error) {
         if (runId.current !== id) return;
@@ -328,7 +278,7 @@ export function LabClient() {
       out.push({
         real,
         spark: p.estimatedCount,
-        sam: c?.state === "done" ? countAtThreshold(c.result.detections, threshold) : null,
+        sam: samCount(c, threshold),
       });
     });
     return out;
@@ -354,22 +304,40 @@ export function LabClient() {
       steps,
       identify,
       prices,
+      clip: clipInfo,
       counts: Object.fromEntries(
-        Object.entries(counts).map(([k, v]) => [
-          k,
-          v.state === "done"
-            ? {
-                ...v.result,
+        Object.entries(counts).map(([k, v]) => {
+          if (v.state !== "done") return [k, v];
+          if (v.method === "track") {
+            const f = filterTracks(v.track.units, threshold, v.track.clip);
+            const { tiles: _tiles, ...track } = v.track;
+            return [
+              k,
+              {
+                method: "track",
+                ...track,
                 sharing: v.sharing,
-                countAtThreshold: countAtThreshold(v.result.detections, threshold),
-                setAside: filterDetections(v.result.detections, threshold).dropped.map((x) => ({
-                  id: x.detection.id,
-                  reason: x.reason,
-                })),
-                detections: v.result.detections.map(({ id, box, confidence }) => ({ id, box, confidence })),
-              }
-            : v,
-        ]),
+                count: f.kept.length,
+                setAside: f.dropped.map((x) => ({ id: x.unit.id, reason: x.reason })),
+              },
+            ];
+          }
+          return [
+            k,
+            {
+              method: "frame",
+              why: v.why,
+              ...v.result,
+              sharing: v.sharing,
+              count: samCount(v, threshold),
+              setAside: filterDetections(v.result.detections, threshold).dropped.map((x) => ({
+                id: x.detection.id,
+                reason: x.reason,
+              })),
+              detections: v.result.detections.map(({ id, box, confidence }) => ({ id, box, confidence })),
+            },
+          ];
+        }),
       ),
       threshold,
       realCounts,
@@ -383,7 +351,7 @@ export function LabClient() {
     a.download = `boutik scan ${stamp}.json`;
     a.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 2000);
-  }, [audio, counts, frames, identify, prices, realCounts, scores, steps, threshold, video]);
+  }, [audio, clipInfo, counts, frames, identify, prices, realCounts, scores, steps, threshold, video]);
 
   const started = steps.read.status !== "waiting";
 
@@ -579,19 +547,32 @@ interface ProductCardProps {
 }
 
 function ProductCard({ index, product, frame, count, threshold, prices, realCount, onRealCount }: ProductCardProps) {
-  const filtered = count?.state === "done" ? filterDetections(count.result.detections, threshold) : null;
-  const samCount = filtered ? filtered.kept.length : null;
+  const done = count?.state === "done" ? count : null;
+  const frameView = done?.method === "frame" ? filterDetections(done.result.detections, threshold) : null;
+  const trackView = done?.method === "track" ? filterTracks(done.track.units, threshold, done.track.clip) : null;
+  const sam = samCount(count, threshold);
   const real = realCount.trim() === "" ? null : Number(realCount);
+  const concept = done ? (done.method === "frame" ? done.result.concept : done.track.concept) : product.samPrompt;
+  const usedFallback = done ? (done.method === "frame" ? done.result.usedFallback : done.track.usedFallback) : false;
+  const found = done ? (done.method === "frame" ? done.result.detections.length : done.track.units.length) : 0;
+  const ms = done ? (done.method === "frame" ? done.result.ms : done.track.ms) : undefined;
+  const dropped = frameView
+    ? frameView.dropped.map((d) => ({ reason: d.reason }))
+    : trackView
+      ? trackView.dropped.map((d) => ({ reason: d.reason }))
+      : [];
 
   return (
     <article className="overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]">
-      {frame ? (
-        filtered ? (
+      {done?.method === "track" && trackView ? (
+        <UnitGrid track={done.track} kept={trackView.kept.map((u) => u.id)} dropped={trackView.dropped} />
+      ) : frame ? (
+        frameView ? (
           <FrameOverlay
             src={frame.url}
             width={frame.width}
             height={frame.height}
-            filtered={filtered}
+            filtered={frameView}
             alt={`${product.name} in frame ${frame.index}`}
           />
         ) : (
@@ -608,9 +589,11 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
             </h3>
             <p className="mt-0.5 text-sm text-[var(--color-muted)]">
               {product.appearance ? `${product.appearance} · ` : ""}
-              {product.brand ? `${product.brand} · ` : ""}per {product.unit} · SAM looked for “
-              {count?.state === "done" ? count.result.concept : product.samPrompt}” in frame #{product.bestFrame}
-              {count?.state === "done" && count.result.usedFallback ? ` (“${product.samPrompt}” found nothing)` : ""}
+              {product.brand ? `${product.brand} · ` : ""}per {product.unit} · SAM looked for “{concept}”
+              {done?.method === "track"
+                ? ` through the whole video`
+                : ` in frame #${product.bestFrame}`}
+              {usedFallback ? ` (“${product.samPrompt}” found nothing)` : ""}
             </p>
           </div>
           {prices[0] ? (
@@ -629,10 +612,10 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
           <div className="rounded-xl bg-[var(--color-paper)] p-2.5">
             <dt className="text-[11px] uppercase tracking-wide text-[var(--color-muted)]">SAM 3.1</dt>
             <dd className="mt-0.5 text-2xl font-semibold tabular-nums">
-              {count?.state === "loading" ? "…" : count?.state === "error" ? "!" : (samCount ?? "–")}
+              {count?.state === "loading" ? "…" : count?.state === "error" ? "!" : (sam ?? "–")}
             </dd>
             <dd className="text-[11px] text-[var(--color-muted)]">
-              {count?.state === "done" ? `of ${count.result.detections.length} found · ${formatMs(count.result.ms)}` : ""}
+              {done ? `of ${found} ${done.method === "track" ? "tracked" : "found"} · ${formatMs(ms)}` : ""}
             </dd>
           </div>
           <label className="rounded-xl bg-[var(--color-paper)] p-2.5">
@@ -647,29 +630,36 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
               className="mt-0.5 w-full bg-transparent text-center text-2xl font-semibold tabular-nums outline-none placeholder:text-[var(--color-line)]"
             />
             <span className="block text-[11px] text-[var(--color-muted)]">
-              {real !== null && Number.isFinite(real) && samCount !== null
-                ? samCount === real
+              {real !== null && Number.isFinite(real) && sam !== null
+                ? sam === real
                   ? "SAM exact"
-                  : `SAM off by ${Math.abs(samCount - real)}`
+                  : `SAM off by ${Math.abs(sam - real)}`
                 : "hand count"}
             </span>
           </label>
         </dl>
 
-        {count?.state === "done" && count.sharing ? (
+        {done?.method === "track" ? (
           <p className="mt-3 text-sm text-[var(--color-muted)]">
-            {count.sharing.sortError
-              ? `Looks like ${count.sharing.products - 1} other product${count.sharing.products > 2 ? "s" : ""}; sorting failed: ${count.sharing.sortError}`
-              : `Looks like ${count.sharing.products - 1} other product${count.sharing.products > 2 ? "s" : ""}: SAM found ${count.sharing.groupFound} units by shape, Muse Spark sorted them by packaging${count.sharing.sortMs ? ` in ${formatMs(count.sharing.sortMs)}` : ""}.`}
+            Each unit was followed through {done.track.clip.frames} frames of the clip and counted once, wherever it
+            appeared.
           </p>
         ) : null}
-        {filtered && filtered.dropped.length > 0 ? (
-          <p className="mt-3 text-sm text-[var(--color-muted)]">Set aside: {describeDropped(filtered.dropped)}</p>
+        {done?.method === "frame" && done.why ? <p className="mt-3 text-sm text-[var(--color-warn)]">{done.why}</p> : null}
+        {done?.sharing ? (
+          <p className="mt-3 text-sm text-[var(--color-muted)]">
+            {done.sharing.sortError
+              ? `Looks like ${done.sharing.products - 1} other product${done.sharing.products > 2 ? "s" : ""}; sorting failed: ${done.sharing.sortError}`
+              : `Looks like ${done.sharing.products - 1} other product${done.sharing.products > 2 ? "s" : ""}: SAM found ${done.sharing.groupFound} units by shape, Muse Spark sorted them by packaging${done.sharing.sortMs ? ` in ${formatMs(done.sharing.sortMs)}` : ""}.`}
+          </p>
+        ) : null}
+        {dropped.length > 0 ? (
+          <p className="mt-3 text-sm text-[var(--color-muted)]">Set aside: {describeDropped(dropped)}</p>
         ) : null}
         {product.countingNotes ? <p className="mt-3 text-sm text-[var(--color-muted)]">{product.countingNotes}</p> : null}
         {count?.state === "error" ? <p className="mt-3 text-sm text-[var(--color-bad)]">{count.error}</p> : null}
-        {count?.state === "done" && count.result.warnings.length ? (
-          <p className="mt-3 text-xs text-[var(--color-warn)]">{count.result.warnings.join(" · ")}</p>
+        {done?.method === "frame" && done.result.warnings.length ? (
+          <p className="mt-3 text-xs text-[var(--color-warn)]">{done.result.warnings.join(" · ")}</p>
         ) : null}
         {prices.length > 0 ? (
           <ul className="mt-3 space-y-1 text-sm">
@@ -686,10 +676,61 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
   );
 }
 
+/** Close-ups of every tracked unit: counted ones numbered, set-aside ones greyed with the reason. */
+function UnitGrid({
+  track,
+  kept,
+  dropped,
+}: {
+  track: TrackedCount;
+  kept: string[];
+  dropped: { unit: { id: string }; reason: DropReason }[];
+}) {
+  if (track.units.length === 0) {
+    return (
+      <div className="bg-[var(--color-paper)] px-4 py-6 text-center text-sm text-[var(--color-muted)]">
+        SAM found no units of this product in the video.
+      </div>
+    );
+  }
+  const reasons = new Map(dropped.map((d) => [d.unit.id, d.reason]));
+  const order = [...kept, ...dropped.map((d) => d.unit.id)];
+  return (
+    <div className="grid grid-cols-4 gap-1.5 bg-[var(--color-paper)] p-2 sm:grid-cols-6">
+      {order.map((id) => {
+        const url = track.tiles[id];
+        const reason = reasons.get(id);
+        const number = kept.indexOf(id) + 1;
+        return (
+          <figure key={id} className={`relative overflow-hidden rounded-lg bg-black/5 ${reason ? "opacity-40" : ""}`}>
+            {url ? (
+              // eslint-disable-next-line @next/next/no-img-element -- local blob URL
+              <img src={url} alt="" className="aspect-square w-full object-cover" />
+            ) : (
+              <div className="aspect-square w-full" />
+            )}
+            {reason ? (
+              <figcaption className="absolute inset-x-0 bottom-0 bg-black/70 px-1 py-0.5 text-center text-[10px] leading-tight text-white">
+                {reason}
+              </figcaption>
+            ) : (
+              <span className="absolute left-1 top-1 rounded bg-[rgb(249_115_22)] px-1.5 text-xs font-bold text-white">
+                {number}
+              </span>
+            )}
+          </figure>
+        );
+      })}
+    </div>
+  );
+}
+
 const DROP_LABELS: Record<DropReason, string> = {
   "too small": "too small, probably further back",
   "too large": "too large, probably a whole stack",
   "low confidence": "below the confidence line",
+  "seen once": "seen in only one frame",
+  "partly out of view": "never fully in the picture",
 };
 
 function describeDropped(dropped: { reason: DropReason }[]): string {

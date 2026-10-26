@@ -185,9 +185,11 @@ export async function extractPrices(
   return { ...normalizePrices(raw, products.length), model: MODELS.vision };
 }
 
-const ASSIGN_INSTRUCTIONS = `An object detector found units on a market stall and drew a numbered box around each.
-Several products look alike (for example the same carton in different flavours), so the detector cannot tell
-them apart. Look at what is printed or visible on each numbered unit and say which product it is.
+const ASSIGN_INSTRUCTIONS = `An object detector found units on a market stall. Each unit carries a number: either a numbered box
+drawn on a photo of the stall, or a numbered tile in a grid of close-ups (one unit per tile, cropped from the video
+at the moment it was clearest). Several products look alike (for example the same carton in different flavours),
+so the detector cannot tell them apart. Look at what is printed or visible on each numbered unit and say which
+product it is.
 
 For every number shown, give productIndex: the index of the matching product from the list. When a unit could
 be one of several look-alikes and its label is hard to read, pick the most likely one from its colours and
@@ -214,7 +216,7 @@ export async function assignDetections(
       {
         role: "user",
         content: [
-          { type: "text", text: `Products:\n${list}\n\nThe image has boxes numbered 1 to ${labelCount}.` },
+          { type: "text", text: `Products:\n${list}\n\nThe image shows units numbered 1 to ${labelCount}.` },
           { type: "image_url", image_url: { url: annotatedDataUrl } },
         ],
       },

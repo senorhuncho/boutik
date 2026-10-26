@@ -85,3 +85,31 @@ export interface CountResult {
   model: string;
   ms: number;
 }
+
+export interface TrackBox {
+  /** Frame index in the tracking clip. */
+  f: number;
+  /** left, top, right, bottom in clip pixels. */
+  b: [number, number, number, number];
+  c: number | null;
+}
+
+/** One physical unit followed through the clip by SAM 3.1. */
+export interface Track {
+  id: string;
+  boxes: TrackBox[];
+}
+
+export interface TrackResult {
+  concept: string;
+  usedFallback: boolean;
+  tracks: Track[];
+  /** Highest frame index seen + 1. */
+  frames: number;
+  /** Most units SAM reported in any one frame. */
+  maxPerFrame: number;
+  outcome: string;
+  warnings: string[];
+  model: string;
+  ms: number;
+}

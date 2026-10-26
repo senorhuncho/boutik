@@ -8,7 +8,7 @@ import {
   normalizePrices,
   transcriptionKeywords,
 } from "../lib/scan/normalize.ts";
-import { groupForCounting } from "../lib/scan/grouping.ts";
+import { groupForCounting, shapeGroups } from "../lib/scan/grouping.ts";
 import { countAtThreshold, filterDetections, scoreMethods } from "../lib/scan/accuracy.ts";
 import type { Detection } from "../lib/scan/types.ts";
 
@@ -259,5 +259,17 @@ test("normalizePrices drops an unmatched copy of a matched price", () => {
     prices.map((p) => [p.productIndex, p.productName]),
     [[3, "plantain"], [-1, "sugar"], [4, "bananas"]],
     "matched prices for different products are both kept",
+  );
+});
+
+test("shapeGroups gives one video search per shape with its frame groups", () => {
+  const p = (samPrompt: string, bestFrame: number) => ({ samPrompt, samFallback: "box", bestFrame });
+  const shapes = shapeGroups([p("carton", 0), p("carton", 3), p("bag", 1), p("carton", 0)]);
+  assert.deepEqual(
+    shapes.map((s) => [s.concept, s.candidates, s.byFrame.map((g) => [g.frame, g.members])]),
+    [
+      ["carton", [0, 1, 3], [[0, [0, 3]], [3, [1]]]],
+      ["bag", [2], [[1, [2]]]],
+    ],
   );
 });

@@ -7,7 +7,7 @@ import {
 } from "@meta-sam/parser";
 import type OpenAI from "openai";
 import { MODELS, meta } from "./client";
-import type { Detection } from "@/lib/scan/types";
+import type { Detection, Track, TrackBox } from "@/lib/scan/types";
 
 /**
  * The API streams `response.content_part.done` but not always
@@ -107,20 +107,6 @@ export async function segmentImage(imageDataUrl: string, concept: string): Promi
   });
 
   return { detections, outcome: result.outcome.status, warnings };
-}
-
-export interface TrackBox {
-  /** Frame index in the uploaded clip. */
-  f: number;
-  /** left, top, right, bottom in clip pixels. */
-  b: [number, number, number, number];
-  c: number | null;
-}
-
-export interface Track {
-  id: string;
-  /** Every frame the unit was seen in, in order. */
-  boxes: TrackBox[];
 }
 
 export interface VideoSegmentResult {

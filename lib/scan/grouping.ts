@@ -40,3 +40,28 @@ export function groupForCounting(products: readonly Pick<Product, "samPrompt" | 
   }
   return groups;
 }
+
+export interface ShapeGroup {
+  concept: string;
+  fallback: string;
+  /** Every product with this shape. */
+  candidates: number[];
+  /** The same shape split by best frame, for frame-by-frame counting. */
+  byFrame: CountGroup[];
+}
+
+/** Products grouped by the shape SAM searches for: one video search per shape. */
+export function shapeGroups(products: readonly Pick<Product, "samPrompt" | "samFallback" | "bestFrame">[]): ShapeGroup[] {
+  const shapes = new Map<string, ShapeGroup>();
+  for (const group of groupForCounting(products)) {
+    const shape = shapes.get(group.concept) ?? {
+      concept: group.concept,
+      fallback: group.fallback,
+      candidates: group.candidates,
+      byFrame: [],
+    };
+    shape.byFrame.push(group);
+    shapes.set(group.concept, shape);
+  }
+  return [...shapes.values()];
+}

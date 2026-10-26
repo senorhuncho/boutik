@@ -1,6 +1,6 @@
 import type { Detection } from "./types.ts";
 
-export type DropReason = "low confidence" | "too small" | "too large";
+export type DropReason = "low confidence" | "too small" | "too large" | "seen once" | "partly out of view";
 
 export interface FilteredDetections {
   kept: Detection[];

@@ -3,6 +3,7 @@ import { MODELS } from "@/lib/meta/client";
 import { segmentVideo } from "@/lib/meta/sam";
 import { cleanSamPrompt } from "@/lib/scan/normalize";
 import { BadRequest, assertLabAccess, jsonError, readForm } from "@/lib/scan/http";
+import type { TrackResult } from "@/lib/scan/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -26,9 +27,23 @@ export async function POST(request: Request) {
     const concept = cleanSamPrompt(form.get("concept"), "");
     if (!concept) throw new BadRequest("Missing concept.");
 
+    const fallback = cleanSamPrompt(form.get("fallback"), "");
+
     const dataUrl = `data:${clip.type};base64,${Buffer.from(await clip.arrayBuffer()).toString("base64")}`;
-    const result = await segmentVideo(dataUrl, concept);
-    return NextResponse.json({ concept, ...result, model: MODELS.segment, ms: Date.now() - started });
+    let used = concept;
+    let result = await segmentVideo(dataUrl, concept);
+    if (result.tracks.length === 0 && fallback && fallback !== concept) {
+      used = fallback;
+      result = await segmentVideo(dataUrl, fallback);
+    }
+    const body: TrackResult = {
+      concept: used,
+      usedFallback: used !== concept,
+      ...result,
+      model: MODELS.segment,
+      ms: Date.now() - started,
+    };
+    return NextResponse.json(body);
   } catch (error) {
     return jsonError(error);
   }

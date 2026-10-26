@@ -78,6 +78,7 @@ export function normalizeIdentify(
     products.push({
       name,
       brand: text(item.brand, 60),
+      appearance: text(item.appearance, 160),
       samPrompt: cleanSamPrompt(item.samPrompt, unit),
       samFallback: cleanSamPrompt(item.samFallback, unit),
       unit,

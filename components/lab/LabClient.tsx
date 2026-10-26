@@ -162,7 +162,12 @@ export function LabClient() {
                   sortForm.append(
                     "products",
                     JSON.stringify(
-                      group.candidates.map((i) => ({ index: i, name: products[i]?.name, brand: products[i]?.brand })),
+                      group.candidates.map((i) => ({
+                        index: i,
+                        name: products[i]?.name,
+                        brand: products[i]?.brand,
+                        appearance: products[i]?.appearance,
+                      })),
                     ),
                   );
                   const sorted = await postForm<AssignResponse>("/api/scan/assign", sortForm);
@@ -602,6 +607,7 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
               {index + 1}. {product.name}
             </h3>
             <p className="mt-0.5 text-sm text-[var(--color-muted)]">
+              {product.appearance ? `${product.appearance} · ` : ""}
               {product.brand ? `${product.brand} · ` : ""}per {product.unit} · SAM looked for “
               {count?.state === "done" ? count.result.concept : product.samPrompt}” in frame #{product.bestFrame}
               {count?.state === "done" && count.result.usedFallback ? ` (“${product.samPrompt}” found nothing)` : ""}

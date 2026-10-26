@@ -16,6 +16,10 @@ For each product:
 - name: what a buyer would search for, with size if visible. Use the language on the packaging, else English.
   Use local market names: in Cameroon and Nigeria, plantains (large, cooked) are not sweet bananas.
 - brand: the brand printed on the pack, or "" if none is visible.
+- appearance: a few words on how one unit looks, enough to tell it apart from similar products on this stall:
+  main colours, big printed words, pictures (for example "yellow carton, blue SUPER PACK badge",
+  "orange carton, white Indomie logo", "pink carton with a running man").
+  Give look-alike products different, specific names and appearances.
 - samPrompt: the plainest everyday English noun (one or two words) for the physical shape of ONE unit, for an
   object detector that only sees shapes. Examples: "carton", "bag", "sack", "bottle", "tin", "jerrycan",
   "crate", "sachet", "bunch of plantains", "pineapple", "tomato". Never describe contents, brand or flavour:
@@ -195,11 +199,11 @@ not in the list). Every number must appear exactly once.`;
  */
 export async function assignDetections(
   annotatedDataUrl: string,
-  products: { index: number; name: string; brand: string }[],
+  products: { index: number; name: string; brand: string; appearance: string }[],
   labelCount: number,
 ): Promise<{ assignments: Map<number, number>; model: string }> {
   const list = products
-    .map((p) => `${p.index}. ${p.name}${p.brand ? ` (${p.brand})` : ""}`)
+    .map((p) => `${p.index}. ${p.name}${p.brand ? ` (${p.brand})` : ""}${p.appearance ? `: ${p.appearance}` : ""}`)
     .join("\n");
   const completion = await meta().chat.completions.create({
     model: MODELS.vision,

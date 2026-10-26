@@ -7,26 +7,19 @@ export interface FilteredDetections {
   dropped: { detection: Detection; reason: DropReason }[];
 }
 
-/** Units of one product in one frame are roughly the same size. */
-const MIN_AREA_RATIO = 0.25;
-const MAX_AREA_RATIO = 4;
+/** Consecutive sizes this many times apart split units into separate groups. */
+const SIZE_GAP = 3;
 
 function area(d: Detection): number {
   return Math.max(0, d.box.right - d.box.left) * Math.max(0, d.box.bottom - d.box.top);
 }
 
-function median(values: number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? (sorted[mid] ?? 0) : ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
-}
-
 /**
- * Keeps SAM detections that are confident enough and about the size of a
- * unit on this stall. Much smaller matches are usually the same product on a
- * stall further back; much larger ones are a whole stack seen as one object.
- * The reference size is the median of the larger half of detections, so a
- * crowd of tiny background matches cannot drag it down.
+ * Keeps SAM detections that are confident enough, then looks for a clear jump
+ * in size. A pile seen in perspective shrinks gradually towards the back and
+ * is kept whole; a stall further back, or one box drawn around a whole stack,
+ * sits on the other side of a jump of 3x or more. The largest group is kept
+ * (the larger-unit group on a tie); the others are set aside with a reason.
  */
 export function filterDetections(
   detections: readonly Detection[],
@@ -41,15 +34,25 @@ export function filterDetections(
   }
   if (options.sizeFilter === false || confident.length < 3) return { kept: confident, dropped };
 
-  const areas = confident.map(area).sort((a, b) => b - a);
-  const reference = median(areas.slice(0, Math.ceil(areas.length / 2)));
-  const kept: Detection[] = [];
-  for (const d of confident) {
-    const a = area(d);
-    if (a < reference * MIN_AREA_RATIO) dropped.push({ detection: d, reason: "too small" });
-    else if (a > reference * MAX_AREA_RATIO) dropped.push({ detection: d, reason: "too large" });
-    else kept.push(d);
+  const sorted = [...confident].sort((a, b) => area(b) - area(a));
+  const clusters: Detection[][] = [[sorted[0] as Detection]];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = area(sorted[i - 1] as Detection);
+    const cur = area(sorted[i] as Detection);
+    if (cur <= 0 || prev / cur >= SIZE_GAP) clusters.push([]);
+    (clusters[clusters.length - 1] as Detection[]).push(sorted[i] as Detection);
   }
+
+  let keep = 0;
+  clusters.forEach((c, i) => {
+    if (c.length > (clusters[keep] as Detection[]).length) keep = i;
+  });
+  const keptIds = new Set((clusters[keep] as Detection[]).map((d) => d.id));
+  const kept = confident.filter((d) => keptIds.has(d.id));
+  clusters.forEach((c, i) => {
+    if (i === keep) return;
+    for (const d of c) dropped.push({ detection: d, reason: i < keep ? "too large" : "too small" });
+  });
   return { kept, dropped };
 }
 

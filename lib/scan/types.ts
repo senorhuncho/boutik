@@ -11,6 +11,8 @@ export interface Product {
   name: string;
   /** Brand printed on the pack, or "" when there is none. */
   brand: string;
+  /** How the pack looks (colours, big printed words), to tell look-alikes apart. */
+  appearance: string;
   /** Short English noun phrase for one physical unit, sent to SAM. */
   samPrompt: string;
   /** Plainer description of the same unit's shape, tried when samPrompt finds nothing. */

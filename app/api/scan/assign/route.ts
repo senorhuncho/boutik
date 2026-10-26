@@ -26,10 +26,15 @@ export async function POST(request: Request) {
       throw new BadRequest("Send between 2 and 24 products.");
     }
     const products = raw.map((p) => {
-      const item = (p ?? {}) as { index?: unknown; name?: unknown; brand?: unknown };
+      const item = (p ?? {}) as { index?: unknown; name?: unknown; brand?: unknown; appearance?: unknown };
       const index = Number(item.index);
       if (!Number.isInteger(index) || index < 0) throw new BadRequest("Each product needs an index.");
-      return { index, name: String(item.name ?? "").slice(0, 80), brand: String(item.brand ?? "").slice(0, 60) };
+      return {
+        index,
+        name: String(item.name ?? "").slice(0, 80),
+        brand: String(item.brand ?? "").slice(0, 60),
+        appearance: String(item.appearance ?? "").slice(0, 160),
+      };
     });
 
     const { assignments, model } = await assignDetections(await toDataUrl(image), products, labels);

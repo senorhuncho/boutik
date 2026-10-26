@@ -28,6 +28,7 @@ export const identifySchema = {
         required: [
           "name",
           "brand",
+          "appearance",
           "samPrompt",
           "samFallback",
           "unit",
@@ -40,6 +41,7 @@ export const identifySchema = {
         properties: {
           name: { type: "string" },
           brand: { type: "string" },
+          appearance: { type: "string" },
           samPrompt: { type: "string" },
           samFallback: { type: "string" },
           unit: { type: "string" },

@@ -28,6 +28,7 @@ test("normalizeIdentify clamps values and drops junk", () => {
       {
         name: "Rice 5 kg",
         brand: "Uncle Ben's",
+        appearance: "white sack, green label",
         samPrompt: "bag of rice, sack",
         samFallback: "Sack",
         unit: "bag",
@@ -52,6 +53,8 @@ test("normalizeIdentify clamps values and drops junk", () => {
   assert.equal(rice?.bestFrame, 5, "frame index clamped to last frame");
   assert.equal(rice?.samPrompt, "bag of rice");
   assert.equal(rice?.samFallback, "sack");
+  assert.equal(rice?.appearance, "white sack, green label");
+  assert.equal(products[1]?.appearance, "", "missing appearance becomes empty");
   assert.deepEqual(rice?.keywords, ["riz", "rice"]);
   assert.equal(oil?.unit, "item");
   assert.equal(oil?.samPrompt, "item");
@@ -157,6 +160,15 @@ test("filterDetections drops a whole-stack box and keeps same-size units", () =>
   const result = filterDetections([...units, stack], 0.5);
   assert.equal(result.kept.length, 4);
   assert.deepEqual(result.dropped.map((d) => [d.detection.id, d.reason]), [["stack", "too large"]]);
+});
+
+test("filterDetections keeps a whole pile that shrinks gradually towards the back (warehouse cartons)", () => {
+  // Real SAM 3.1 carton areas from the Indomie warehouse frame: front cartons ~65k px, back ones ~5k, no jump.
+  const areas = [64666, 55550, 53922, 53130, 51939, 44526, 38000, 30500, 24000, 18800, 14200, 10900, 8400, 6536, 6018, 5187];
+  const pile = areas.map((a, i) => boxed(String(i), 0.9, 0, 0, a, 1));
+  const result = filterDetections(pile, 0.5);
+  assert.equal(result.kept.length, areas.length);
+  assert.equal(result.dropped.length, 0);
 });
 
 test("filterDetections leaves very small sets alone", () => {

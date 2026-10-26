@@ -3,7 +3,7 @@ import type { ExtractedFrame } from "@/lib/media/browser";
 import type { TrackingClip } from "@/lib/media/clip";
 import { countAtThreshold } from "@/lib/scan/accuracy";
 import type { CountGroup, ShapeGroup } from "@/lib/scan/grouping";
-import { filterTracks, isSaturated, summarizeTracks, type UnitTrack } from "@/lib/scan/tracks";
+import { filterTracks, isSaturated, splitJumps, summarizeTracks, type UnitTrack } from "@/lib/scan/tracks";
 import type { CountResult, Product, TrackResult } from "@/lib/scan/types";
 
 /** How a product's units were found when it looks like other products. */
@@ -20,6 +20,8 @@ export interface TrackedCount {
   usedFallback: boolean;
   /** Units assigned to this product (all units when it has no look-alikes). */
   units: UnitTrack[];
+  /** Units Muse Spark said are not this product. */
+  rejected: string[];
   /** Close-up of each unit's clearest view, by unit id. */
   tiles: Record<string, string>;
   clip: { width: number; height: number; fps: number; frames: number };
@@ -28,7 +30,7 @@ export interface TrackedCount {
 
 export type CountState =
   | { state: "loading" }
-  | { state: "done"; method: "frame"; result: CountResult; sharing: Sharing | null; why?: string }
+  | { state: "done"; method: "frame"; result: CountResult; rejected: string[]; sharing: Sharing | null; why?: string }
   | { state: "done"; method: "track"; track: TrackedCount; sharing: Sharing | null }
   | { state: "error"; error: string };
 
@@ -59,8 +61,8 @@ export async function postForm<T>(url: string, form: FormData): Promise<T> {
 /** SAM's count for a product at the current confidence threshold, whichever way it was counted. */
 export function samCount(state: CountState | undefined, threshold: number): number | null {
   if (state?.state !== "done") return null;
-  if (state.method === "frame") return countAtThreshold(state.result.detections, threshold);
-  return filterTracks(state.track.units, threshold, state.track.clip).kept.length;
+  if (state.method === "frame") return countAtThreshold(state.result.detections, threshold, new Set(state.rejected));
+  return filterTracks(state.track.units, threshold, state.track.clip, new Set(state.track.rejected)).kept.length;
 }
 
 /** Only one task may seek the shared video element at a time. */
@@ -111,12 +113,8 @@ async function countFrameGroup(group: CountGroup, ctx: CountContext, why?: strin
   form.append("frameIndex", String(frame.index));
   const found = await postForm<CountResult>("/api/scan/count", form);
 
-  if (group.candidates.length === 1) {
-    const only = group.members[0] as number;
-    updates[only] = { state: "done", method: "frame", result: { ...found, productIndex: only }, sharing: null, why };
-    return updates;
-  }
-
+  // Muse Spark checks every unit, even with one product of this shape: it rejects lookalikes from other
+  // stalls or storage that the size filter cannot tell apart. With several products it also sorts them.
   const labelled = [...found.detections]
     .sort((a, b) => (b.confidence ?? 1) - (a.confidence ?? 1))
     .slice(0, MAX_SORT_LABELS);
@@ -130,14 +128,18 @@ async function countFrameGroup(group: CountGroup, ctx: CountContext, why?: strin
       sortMs = sorted.ms;
       byId = new Map(labelled.map((d, k) => [d.id, sorted.byLabel[String(k + 1)] ?? -1]));
     } catch (error) {
-      sortError = error instanceof Error ? error.message : "Sorting failed";
+      sortError = error instanceof Error ? error.message : "Checking failed";
     }
   }
+  const single = group.candidates.length === 1;
   for (const member of group.members) {
+    const detections = single || sortError ? found.detections : found.detections.filter((d) => byId.get(d.id) === member);
+    const rejected = single && !sortError ? found.detections.filter((d) => byId.get(d.id) !== member).map((d) => d.id) : [];
     updates[member] = {
       state: "done",
       method: "frame",
-      result: { ...found, productIndex: member, detections: found.detections.filter((d) => byId.get(d.id) === member) },
+      result: { ...found, productIndex: member, detections },
+      rejected,
       sharing: { products: group.candidates.length, groupFound: found.detections.length, sortMs, sortError },
       why,
     };
@@ -181,7 +183,7 @@ export async function countShape(shape: ShapeGroup, ctx: CountContext): Promise<
     );
   }
 
-  const units = summarizeTracks(tracked.tracks);
+  const units = summarizeTracks(splitJumps(tracked.tracks, clip));
   const tiles: Record<string, string> = {};
   const tileList: Tile[] = [];
   await withVideo(async () => {
@@ -202,12 +204,6 @@ export async function countShape(shape: ShapeGroup, ctx: CountContext): Promise<
     ms: tracked.ms,
   };
   const updates: Record<number, CountState> = {};
-
-  if (shape.candidates.length === 1) {
-    updates[shape.candidates[0] as number] = { state: "done", method: "track", track: { ...base, units }, sharing: null };
-    return updates;
-  }
-
   let byLabel: Record<string, number> = {};
   let sortMs: number | undefined;
   let sortError: string | undefined;
@@ -218,16 +214,16 @@ export async function countShape(shape: ShapeGroup, ctx: CountContext): Promise<
       byLabel = sorted.byLabel;
       sortMs = sorted.ms;
     } catch (error) {
-      sortError = error instanceof Error ? error.message : "Sorting failed";
+      sortError = error instanceof Error ? error.message : "Checking failed";
     }
   }
+  const single = shape.candidates.length === 1;
+  const sharing = { products: shape.candidates.length, groupFound: units.length, sortMs, sortError };
   for (const candidate of shape.candidates) {
-    updates[candidate] = {
-      state: "done",
-      method: "track",
-      track: { ...base, units: units.filter((_, k) => byLabel[String(k + 1)] === candidate) },
-      sharing: { products: shape.candidates.length, groupFound: units.length, sortMs, sortError },
-    };
+    const mine = single || sortError ? units : units.filter((_, k) => byLabel[String(k + 1)] === candidate);
+    const rejected =
+      single && !sortError ? units.filter((_, k) => byLabel[String(k + 1)] !== candidate).map((u) => u.id) : [];
+    updates[candidate] = { state: "done", method: "track", track: { ...base, units: mine, rejected }, sharing };
   }
   return updates;
 }

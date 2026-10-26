@@ -309,7 +309,7 @@ export function LabClient() {
         Object.entries(counts).map(([k, v]) => {
           if (v.state !== "done") return [k, v];
           if (v.method === "track") {
-            const f = filterTracks(v.track.units, threshold, v.track.clip);
+            const f = filterTracks(v.track.units, threshold, v.track.clip, new Set(v.track.rejected));
             const { tiles: _tiles, ...track } = v.track;
             return [
               k,
@@ -330,7 +330,7 @@ export function LabClient() {
               ...v.result,
               sharing: v.sharing,
               count: samCount(v, threshold),
-              setAside: filterDetections(v.result.detections, threshold).dropped.map((x) => ({
+              setAside: filterDetections(v.result.detections, threshold, { rejected: new Set(v.rejected) }).dropped.map((x) => ({
                 id: x.detection.id,
                 reason: x.reason,
               })),
@@ -548,8 +548,14 @@ interface ProductCardProps {
 
 function ProductCard({ index, product, frame, count, threshold, prices, realCount, onRealCount }: ProductCardProps) {
   const done = count?.state === "done" ? count : null;
-  const frameView = done?.method === "frame" ? filterDetections(done.result.detections, threshold) : null;
-  const trackView = done?.method === "track" ? filterTracks(done.track.units, threshold, done.track.clip) : null;
+  const frameView =
+    done?.method === "frame"
+      ? filterDetections(done.result.detections, threshold, { rejected: new Set(done.rejected) })
+      : null;
+  const trackView =
+    done?.method === "track"
+      ? filterTracks(done.track.units, threshold, done.track.clip, new Set(done.track.rejected))
+      : null;
   const sam = samCount(count, threshold);
   const real = realCount.trim() === "" ? null : Number(realCount);
   const concept = done ? (done.method === "frame" ? done.result.concept : done.track.concept) : product.samPrompt;
@@ -646,7 +652,10 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
           </p>
         ) : null}
         {done?.method === "frame" && done.why ? <p className="mt-3 text-sm text-[var(--color-warn)]">{done.why}</p> : null}
-        {done?.sharing ? (
+        {done?.sharing && done.sharing.products === 1 && done.sharing.sortError ? (
+          <p className="mt-3 text-sm text-[var(--color-warn)]">Muse Spark could not check the units: {done.sharing.sortError}</p>
+        ) : null}
+        {done?.sharing && done.sharing.products > 1 ? (
           <p className="mt-3 text-sm text-[var(--color-muted)]">
             {done.sharing.sortError
               ? `Looks like ${done.sharing.products - 1} other product${done.sharing.products > 2 ? "s" : ""}; sorting failed: ${done.sharing.sortError}`
@@ -731,6 +740,7 @@ const DROP_LABELS: Record<DropReason, string> = {
   "low confidence": "below the confidence line",
   "seen once": "seen in only one frame",
   "partly out of view": "never fully in the picture",
+  "not this product": "not this product, checked by Muse Spark",
 };
 
 function describeDropped(dropped: { reason: DropReason }[]): string {

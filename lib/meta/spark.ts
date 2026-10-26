@@ -193,9 +193,10 @@ product it is.
 
 For every number shown, give productIndex: the index of the matching product from the list. When a unit could
 be one of several look-alikes and its label is hard to read, pick the most likely one from its colours and
-position next to units you can read. Use -1 only when the box is clearly not one unit of any listed product
-(two units in one box, a shelf, a person, an empty space, or a different product). Every number must appear
-exactly once.`;
+position next to units you can read. Use -1 when the unit is clearly not one unit of a listed product: two units
+in one box, a shelf, a person, an empty space, a different item that only has the same shape (a feed sack next to
+rice bags, a water bottle next to oil), or goods on another stall in the background. When only one product is
+listed, this check is the whole job. Every number must appear exactly once.`;
 
 /**
  * SAM finds units by shape; Muse Spark reads each numbered unit and says which

@@ -23,8 +23,46 @@ export interface FilteredUnits {
   dropped: { unit: UnitTrack; reason: DropReason }[];
 }
 
+/** Ids Muse Spark said are not this product (another stall, storage, a different item). */
+export type Rejected = ReadonlySet<string>;
+
 function boxArea(b: [number, number, number, number]): number {
   return Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+}
+
+/** Between two sightings of one physical unit, its centre cannot cross this share of the picture. */
+const MAX_JUMP = 0.35;
+
+/**
+ * SAM 3.1 re-uses an id when an identical-looking unit appears after the first
+ * one left the picture: a bottle leaving at the left edge "returns" at the right
+ * edge as the camera reaches a second, identical group. A real unit moves
+ * smoothly during a pan, so a track is split wherever its centre jumps more than
+ * a third of the picture between two sightings. Pieces get ids "7", "7.2", ...
+ */
+export function splitJumps(tracks: readonly Track[], clip: { width: number; height: number }): Track[] {
+  const out: Track[] = [];
+  for (const track of tracks) {
+    const sorted = [...track.boxes].sort((a, b) => a.f - b.f);
+    let piece: Track["boxes"] = [];
+    let part = 1;
+    const flush = () => {
+      if (piece.length) out.push({ id: part === 1 ? track.id : `${track.id}.${part}`, boxes: piece });
+      part++;
+      piece = [];
+    };
+    for (const box of sorted) {
+      const prev = piece[piece.length - 1];
+      if (prev) {
+        const dx = Math.abs((box.b[0] + box.b[2]) / 2 - (prev.b[0] + prev.b[2]) / 2) / clip.width;
+        const dy = Math.abs((box.b[1] + box.b[3]) / 2 - (prev.b[1] + prev.b[3]) / 2) / clip.height;
+        if (dx > MAX_JUMP || dy > MAX_JUMP) flush();
+      }
+      piece.push(box);
+    }
+    flush();
+  }
+  return out;
 }
 
 export function summarizeTracks(tracks: readonly Track[]): UnitTrack[] {
@@ -80,11 +118,13 @@ export function filterTracks(
   units: readonly UnitTrack[],
   threshold: number,
   clip: { width: number; height: number },
+  rejected: Rejected = new Set(),
 ): FilteredUnits {
   const dropped: FilteredUnits["dropped"] = [];
   const candidates: UnitTrack[] = [];
   for (const unit of units) {
-    if (unit.seen < 2) dropped.push({ unit, reason: "seen once" });
+    if (rejected.has(unit.id)) dropped.push({ unit, reason: "not this product" });
+    else if (unit.seen < 2) dropped.push({ unit, reason: "seen once" });
     else candidates.push(unit);
   }
 

@@ -1,6 +1,12 @@
 import type { Detection } from "./types.ts";
 
-export type DropReason = "low confidence" | "too small" | "too large" | "seen once" | "partly out of view";
+export type DropReason =
+  | "low confidence"
+  | "too small"
+  | "too large"
+  | "seen once"
+  | "partly out of view"
+  | "not this product";
 
 export interface FilteredDetections {
   kept: Detection[];
@@ -31,12 +37,13 @@ function containsCenter(outer: Detection, inner: Detection): boolean {
 export function filterDetections(
   detections: readonly Detection[],
   threshold: number,
-  options: { sizeFilter?: boolean } = {},
+  options: { sizeFilter?: boolean; rejected?: ReadonlySet<string> } = {},
 ): FilteredDetections {
   const dropped: FilteredDetections["dropped"] = [];
   const confident: Detection[] = [];
   for (const d of detections) {
-    if (d.confidence !== null && d.confidence < threshold) dropped.push({ detection: d, reason: "low confidence" });
+    if (options.rejected?.has(d.id)) dropped.push({ detection: d, reason: "not this product" });
+    else if (d.confidence !== null && d.confidence < threshold) dropped.push({ detection: d, reason: "low confidence" });
     else confident.push(d);
   }
   if (options.sizeFilter === false || confident.length < 3) return { kept: confident, dropped };
@@ -69,9 +76,13 @@ export function filterDetections(
   return { kept, dropped };
 }
 
-/** How many units SAM counts after the confidence and size filters. */
-export function countAtThreshold(detections: readonly Detection[], threshold: number): number {
-  return filterDetections(detections, threshold).kept.length;
+/** How many units SAM counts after Muse Spark's check and the confidence and size filters. */
+export function countAtThreshold(
+  detections: readonly Detection[],
+  threshold: number,
+  rejected: ReadonlySet<string> = new Set(),
+): number {
+  return filterDetections(detections, threshold, { rejected }).kept.length;
 }
 
 export interface AccuracyRow {

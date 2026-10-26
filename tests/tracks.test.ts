@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { filterTracks, isSaturated, summarizeTracks, TRACK_LIMIT } from "../lib/scan/tracks.ts";
+import { filterTracks, isSaturated, splitJumps, summarizeTracks, TRACK_LIMIT } from "../lib/scan/tracks.ts";
 import type { Track } from "../lib/scan/types.ts";
 
 interface Fixture {
@@ -75,4 +75,39 @@ test("a unit seen in only one frame is set aside", () => {
   const { kept, dropped } = filterTracks(units, 0.5, { width: 400, height: 300 });
   assert.deepEqual(kept.map((u) => u.id), ["a", "b"]);
   assert.deepEqual(dropped.map((d) => [d.unit.id, d.reason]), [["c", "seen once"]]);
+});
+
+test("identical bottles on a second stall are new units, not the first ones coming back (real SAM output)", () => {
+  // Two identical stalls side by side, panned left to right. SAM 3.1 re-used the 4 bottle ids when the
+  // second stall's bottles entered at the right edge just after the first stall's left at the left edge.
+  const fx = load("sam-track-two-stalls-bottles.json");
+  const clip = { width: 960, height: 720 };
+  assert.equal(fx.tracks.length, 4);
+  const split = splitJumps(fx.tracks, clip);
+  assert.equal(split.length, 8);
+  assert.ok(split.every((t) => t.boxes.length >= 2));
+  const units = summarizeTracks(split);
+  assert.equal(filterTracks(units, 0.5, clip).kept.length, 8);
+});
+
+test("splitJumps keeps a unit that is hidden for a while and reappears nearby", () => {
+  const track: Track = {
+    id: "3",
+    boxes: [
+      { f: 0, b: [100, 100, 150, 200], c: 0.9 },
+      { f: 1, b: [95, 100, 145, 200], c: 0.9 },
+      { f: 9, b: [60, 100, 110, 200], c: 0.9 },
+    ],
+  };
+  assert.deepEqual(splitJumps([track], { width: 960, height: 540 }).map((t) => t.id), ["3"]);
+});
+
+test("units Muse Spark rejected are set aside first", () => {
+  const units = summarizeTracks([
+    { id: "a", boxes: [{ f: 0, b: [10, 10, 60, 60], c: 0.9 }, { f: 1, b: [10, 10, 60, 60], c: 0.9 }] },
+    { id: "b", boxes: [{ f: 0, b: [100, 10, 150, 60], c: 0.9 }, { f: 1, b: [100, 10, 150, 60], c: 0.9 }] },
+  ]);
+  const { kept, dropped } = filterTracks(units, 0.5, { width: 400, height: 300 }, new Set(["b"]));
+  assert.deepEqual(kept.map((u) => u.id), ["a"]);
+  assert.deepEqual(dropped.map((d) => [d.unit.id, d.reason]), [["b", "not this product"]]);
 });

@@ -22,8 +22,8 @@ export async function POST(request: Request) {
       throw new BadRequest(`labels must be between 1 and ${MAX_LABELS}.`);
     }
     const raw = parseJsonField<unknown>(form.get("products"), "products");
-    if (!Array.isArray(raw) || raw.length < 2 || raw.length > 24) {
-      throw new BadRequest("Send between 2 and 24 products.");
+    if (!Array.isArray(raw) || raw.length < 1 || raw.length > 24) {
+      throw new BadRequest("Send between 1 and 24 products.");
     }
     const products = raw.map((p) => {
       const item = (p ?? {}) as { index?: unknown; name?: unknown; brand?: unknown; appearance?: unknown };

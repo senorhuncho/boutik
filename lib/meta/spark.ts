@@ -195,12 +195,23 @@ For every number shown, give productIndex: the index of the matching product fro
 be one of several look-alikes and its label is hard to read, pick the most likely one from its colours and
 position next to units you can read. Use -1 when the unit is clearly not one unit of a listed product: two units
 in one box, a shelf, a person, an empty space, a different item that only has the same shape (a feed sack next to
-rice bags, a water bottle next to oil), or goods on another stall in the background. When only one product is
-listed, this check is the whole job. Every number must appear exactly once.`;
+rice bags, a water bottle next to oil), or goods on another stall in the background. Every number must appear
+exactly once.`;
+
+const VERIFY_INSTRUCTIONS = `An object detector found units on a market stall that have the shape of one product. Each unit carries
+a number: either a numbered box drawn on a photo of the stall, or a numbered tile in a grid of close-ups.
+Check every number and give productIndex:
+- the product's index when the unit is the same kind of item for sale on this trader's stall. Ignore differences in
+  brand, label, size or colour: a bottle of cooking oil with another label is still cooking oil.
+- -1 only when it is clearly something else: a different kind of item with the same shape (a feed sack next to rice,
+  a water bottle next to oil), goods on another stall in the background, a person, a shelf, an empty space, or a
+  box that covers several units at once.
+Every number must appear exactly once.`;
 
 /**
  * SAM finds units by shape; Muse Spark reads each numbered unit and says which
- * product it is. Returns a map from label (1-based) to product index, -1 for none.
+ * product it is. With one product it only checks that each unit is that kind of
+ * item on this stall. Returns a map from label (1-based) to product index, -1 for none.
  */
 export async function assignDetections(
   annotatedDataUrl: string,
@@ -213,7 +224,7 @@ export async function assignDetections(
   const completion = await meta().chat.completions.create({
     model: MODELS.vision,
     messages: [
-      { role: "system", content: ASSIGN_INSTRUCTIONS },
+      { role: "system", content: products.length === 1 ? VERIFY_INSTRUCTIONS : ASSIGN_INSTRUCTIONS },
       {
         role: "user",
         content: [

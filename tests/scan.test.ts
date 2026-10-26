@@ -154,6 +154,28 @@ test("filterDetections sets aside background matches (real SAM output, 6 bags of
   assert.equal(filterDetections(rice, 0.5, { sizeFilter: false }).kept.length, 11);
 });
 
+test("filterDetections keeps the trader's units even when the stall behind has more (real SAM output)", () => {
+  // SAM 3.1 "bag" on a panned stall frame: 6 bags on the table, 7 smaller ones on a stall behind.
+  const bags = [
+    boxed("0", 0.83, 226, 369, 723, 662),
+    boxed("4", 0.82, 635, 377, 1083, 679),
+    boxed("6", 0.82, 0, 351, 410, 659),
+    boxed("8", 0.85, 435, 83, 753, 379),
+    boxed("11", 0.85, 157, 103, 478, 384),
+    boxed("2", 0.84, 720, 112, 996, 404),
+    boxed("3", 0.75, 147, 0, 309, 87),
+    boxed("9", 0.78, 786, 0, 889, 111),
+    boxed("1", 0.77, 791, 99, 884, 169),
+    boxed("5", 0.76, 886, 17, 984, 67),
+    boxed("7", 0.76, 888, 57, 982, 98),
+    boxed("12", 0.71, 882, 117, 954, 153),
+    boxed("10", 0.73, 886, 90, 955, 125),
+  ];
+  const result = filterDetections(bags, 0.5);
+  assert.deepEqual(result.kept.map((d) => d.id).sort(), ["0", "11", "2", "4", "6", "8"]);
+  assert.ok(result.dropped.every((d) => d.reason === "too small"));
+});
+
 test("filterDetections drops a whole-stack box and keeps same-size units", () => {
   const units = [0, 1, 2, 3].map((i) => boxed(String(i), 0.9, i * 100, 0, i * 100 + 90, 200));
   const stack = boxed("stack", 0.8, 0, 0, 400, 900);
@@ -217,4 +239,25 @@ test("normalizeAssignments fills every label and rejects unknown products", () =
   );
   assert.deepEqual([...map], [[1, 2], [2, -1], [3, -1], [4, -1]]);
   assert.deepEqual([...normalizeAssignments(null, 2, new Set([0]))], [[1, -1], [2, -1]]);
+});
+
+test("normalizePrices drops an unmatched copy of a matched price", () => {
+  const { prices } = normalizePrices(
+    {
+      prices: [
+        { productIndex: 3, productName: "plantain", amount: 2000, currency: "XAF", per: "bunch", quote: "a", confidence: "high" },
+        { productIndex: -1, productName: "plantain", amount: 2000, currency: "XAF", per: "one bunch", quote: "b", confidence: "low" },
+        { productIndex: -1, productName: "sugar", amount: 1500, currency: "XAF", per: "packet", quote: "c", confidence: "low" },
+        { productIndex: -1, productName: "sugar", amount: 1500, currency: "XAF", per: "packet", quote: "d", confidence: "low" },
+        { productIndex: 4, productName: "bananas", amount: 2000, currency: "XAF", per: "bunch", quote: "e", confidence: "high" },
+      ],
+      otherMentions: [],
+    },
+    5,
+  );
+  assert.deepEqual(
+    prices.map((p) => [p.productIndex, p.productName]),
+    [[3, "plantain"], [-1, "sugar"], [4, "bananas"]],
+    "matched prices for different products are both kept",
+  );
 });

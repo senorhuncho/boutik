@@ -93,6 +93,27 @@ export function normalizeIdentify(
   return { stall, products };
 }
 
+/** The same spoken price can come back twice, once matched and once not; keep the matched one. */
+function dropUnmatchedDuplicates(prices: PriceMatch[]): PriceMatch[] {
+  const filler = new Set(["a", "an", "one", "1", "per", "the", "each", "un", "une", "le", "la", "par", "di", "for"]);
+  const unit = (per: string) =>
+    per
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w && !filler.has(w))
+      .join(" ");
+  const key = (p: PriceMatch) => `${p.amount}|${p.currency}|${unit(p.per)}`;
+  const matched = new Set(prices.filter((p) => p.productIndex >= 0).map(key));
+  const seenUnmatched = new Set<string>();
+  return prices.filter((p) => {
+    if (p.productIndex >= 0) return true;
+    const k = key(p);
+    if (matched.has(k) || seenUnmatched.has(k)) return false;
+    seenUnmatched.add(k);
+    return true;
+  });
+}
+
 export function normalizePrices(
   raw: unknown,
   productCount: number,
@@ -118,7 +139,7 @@ export function normalizePrices(
     });
     if (prices.length >= 40) break;
   }
-  return { prices, otherMentions: strings(root.otherMentions, 10, 200) };
+  return { prices: dropUnmatchedDuplicates(prices), otherMentions: strings(root.otherMentions, 10, 200) };
 }
 
 /** Voice Transcribe rejects keywords longer than 30 characters (observed API limit). */

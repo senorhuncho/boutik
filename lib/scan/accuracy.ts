@@ -14,12 +14,19 @@ function area(d: Detection): number {
   return Math.max(0, d.box.right - d.box.left) * Math.max(0, d.box.bottom - d.box.top);
 }
 
+function containsCenter(outer: Detection, inner: Detection): boolean {
+  const cx = (inner.box.left + inner.box.right) / 2;
+  const cy = (inner.box.top + inner.box.bottom) / 2;
+  return cx >= outer.box.left && cx <= outer.box.right && cy >= outer.box.top && cy <= outer.box.bottom;
+}
+
 /**
  * Keeps SAM detections that are confident enough, then looks for a clear jump
- * in size. A pile seen in perspective shrinks gradually towards the back and
- * is kept whole; a stall further back, or one box drawn around a whole stack,
- * sits on the other side of a jump of 3x or more. The largest group is kept
- * (the larger-unit group on a tie); the others are set aside with a reason.
+ * in size (3x or more between neighbours). A pile seen in perspective shrinks
+ * gradually and is kept whole. When there is a jump, the largest units are the
+ * trader's (closest to the camera) and smaller groups are another stall further
+ * back, unless every large box encloses two or more other units: then it was
+ * drawn around a whole stack and is set aside as too large.
  */
 export function filterDetections(
   detections: readonly Detection[],
@@ -44,9 +51,15 @@ export function filterDetections(
   }
 
   let keep = 0;
-  clusters.forEach((c, i) => {
-    if (c.length > (clusters[keep] as Detection[]).length) keep = i;
-  });
+  while (keep < clusters.length - 1) {
+    const smaller = clusters.slice(keep + 1).flat();
+    const encloses = (clusters[keep] as Detection[]).every(
+      (big) => smaller.filter((small) => containsCenter(big, small)).length >= 2,
+    );
+    if (!encloses) break;
+    keep++;
+  }
+
   const keptIds = new Set((clusters[keep] as Detection[]).map((d) => d.id));
   const kept = confident.filter((d) => keptIds.has(d.id));
   clusters.forEach((c, i) => {

@@ -189,9 +189,11 @@ const ASSIGN_INSTRUCTIONS = `An object detector found units on a market stall an
 Several products look alike (for example the same carton in different flavours), so the detector cannot tell
 them apart. Look at what is printed or visible on each numbered unit and say which product it is.
 
-For every number shown, give productIndex: the index of the matching product from the list, or -1 if the box
-is not one unit of any listed product (two units in one box, a shelf, a person, an empty space, or a product
-not in the list). Every number must appear exactly once.`;
+For every number shown, give productIndex: the index of the matching product from the list. When a unit could
+be one of several look-alikes and its label is hard to read, pick the most likely one from its colours and
+position next to units you can read. Use -1 only when the box is clearly not one unit of any listed product
+(two units in one box, a shelf, a person, an empty space, or a different product). Every number must appear
+exactly once.`;
 
 /**
  * SAM finds units by shape; Muse Spark reads each numbered unit and says which

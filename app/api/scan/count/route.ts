@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { segmentImage } from "@/lib/meta/sam";
 import { cleanSamPrompt } from "@/lib/scan/normalize";
-import { BadRequest, imageFile, jsonError, readForm, toDataUrl } from "@/lib/scan/http";
+import { BadRequest, assertLabAccess, imageFile, jsonError, readForm, toDataUrl } from "@/lib/scan/http";
 import { MODELS } from "@/lib/meta/client";
 import type { CountResult } from "@/lib/scan/types";
 
@@ -12,6 +12,7 @@ export const maxDuration = 60;
 export async function POST(request: Request) {
   const started = Date.now();
   try {
+    assertLabAccess(request);
     const form = await readForm(request);
     const frame = imageFile(form.get("frame"), "frame");
     const concept = cleanSamPrompt(form.get("concept"), "");

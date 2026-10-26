@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { extractPrices, transcribeWithSpark } from "@/lib/meta/spark";
 import { transcribeWav } from "@/lib/meta/voice";
 import { transcriptionKeywords } from "@/lib/scan/normalize";
-import { BadRequest, LIMITS, jsonError, parseJsonField, readForm } from "@/lib/scan/http";
+import { BadRequest, assertLabAccess, LIMITS, jsonError, parseJsonField, readForm } from "@/lib/scan/http";
 import type { PricesResult, Product } from "@/lib/scan/types";
 
 export const runtime = "nodejs";
@@ -18,6 +18,7 @@ type ProductInput = Pick<Product, "name" | "brand" | "unit" | "keywords">;
 export async function POST(request: Request) {
   const started = Date.now();
   try {
+    assertLabAccess(request);
     const form = await readForm(request);
     const audio = form.get("audio");
     if (!(audio instanceof File) || audio.size === 0) throw new BadRequest("Missing audio.");

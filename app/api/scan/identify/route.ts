@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { identifyProducts } from "@/lib/meta/spark";
-import { BadRequest, LIMITS, imageFile, jsonError, readForm, toDataUrl } from "@/lib/scan/http";
+import { BadRequest, assertLabAccess, LIMITS, imageFile, jsonError, readForm, toDataUrl } from "@/lib/scan/http";
 import type { IdentifyResult } from "@/lib/scan/types";
 
 export const runtime = "nodejs";
@@ -10,6 +10,7 @@ export const maxDuration = 60;
 export async function POST(request: Request) {
   const started = Date.now();
   try {
+    assertLabAccess(request);
     const form = await readForm(request);
     const files = form.getAll("frames");
     if (files.length === 0) throw new BadRequest("Send at least one frame.");

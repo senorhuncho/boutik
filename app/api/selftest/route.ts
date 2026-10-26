@@ -55,6 +55,7 @@ export async function GET(request: Request) {
   }
 
   const steps: Step[] = [];
+  const includeImage = new URL(request.url).searchParams.get("include") === "image";
 
   await run(steps, "list models", async () => {
     const page = await meta().models.list();
@@ -70,7 +71,11 @@ export async function GET(request: Request) {
           "six 5 kg bags of rice, four 1-litre bottles of yellow cooking oil, and three bunches of plantains. " +
           "Daylight, slightly cluttered, taken straight on.",
       ),
-    (value) => ({ bytes: value.bytes, type: value.dataUrl.slice(5, value.dataUrl.indexOf(";")) }),
+    (value) => ({
+      bytes: value.bytes,
+      type: value.dataUrl.slice(5, value.dataUrl.indexOf(";")),
+      ...(includeImage ? { dataUrl: value.dataUrl } : {}),
+    }),
   );
 
   let products: Awaited<ReturnType<typeof identifyProducts>> | null = null;

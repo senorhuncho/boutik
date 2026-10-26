@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { describeError } from "@/lib/meta/client";
+import { requestHasLabAccess } from "@/lib/lab/access";
 
 export const LIMITS = {
   maxFrames: 10,
@@ -11,10 +12,19 @@ export const LIMITS = {
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export class BadRequest extends Error {}
+export class Locked extends Error {}
+
+/** Every scan call spends API credits, so it needs the lab cookie. */
+export function assertLabAccess(request: Request): void {
+  if (!requestHasLabAccess(request)) throw new Locked("Locked. Open /lab and enter the passcode.");
+}
 
 export function jsonError(error: unknown) {
   if (error instanceof BadRequest) {
     return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+  if (error instanceof Locked) {
+    return NextResponse.json({ error: error.message }, { status: 401 });
   }
   const { status, message } = describeError(error);
   console.error("[scan]", message);

@@ -24,9 +24,8 @@ test("tracking counts the trader's 6 rice bags once each across a whole pan", ()
   const units = summarizeTracks(fx.tracks);
   const { kept, dropped } = filterTracks(units, 0.5, stallClip);
   assert.equal(kept.length, 6);
-  const reasons = dropped.map((d) => d.reason).sort();
-  assert.ok(reasons.includes("partly out of view"), "a bag cut off by the top of the picture is set aside");
-  assert.ok(reasons.every((r) => r === "too small" || r === "partly out of view"));
+  assert.equal(dropped.length, 7);
+  assert.ok(dropped.every((d) => d.reason === "too small" || d.reason === "partly out of view"));
 });
 
 test("tracking counts 4 oil bottles that enter the picture at different times", () => {
@@ -42,28 +41,38 @@ test("a warehouse pile hits SAM's 16-object limit and is flagged for frame-by-fr
   assert.equal(isSaturated(fx), true);
 });
 
-test("summarizeTracks picks each unit's largest view and highest confidence", () => {
+test("summarizeTracks picks each unit's largest usual-size view and highest confidence", () => {
   const [unit] = summarizeTracks([
     {
       id: "7",
       boxes: [
-        { f: 2, b: [0, 0, 10, 10], c: 0.6 },
-        { f: 3, b: [0, 0, 30, 20], c: 0.5 },
-        { f: 3, b: [0, 0, 5, 5], c: 0.9 },
-        { f: 9, b: [0, 0, 20, 20], c: null },
+        { f: 2, b: [0, 0, 20, 20], c: 0.6 },
+        { f: 3, b: [0, 0, 22, 21], c: 0.5 },
+        { f: 4, b: [0, 0, 90, 60], c: 0.4 },
+        { f: 5, b: [0, 0, 19, 20], c: 0.9 },
+        { f: 9, b: [0, 0, 21, 20], c: null },
       ],
     },
   ]);
   assert.deepEqual(unit, {
     id: "7",
     bestFrame: 3,
-    box: { left: 0, top: 0, right: 30, bottom: 20 },
+    box: { left: 0, top: 0, right: 22, bottom: 21 },
     confidence: 0.9,
-    seen: 3,
+    seen: 5,
     first: 2,
     last: 9,
   });
   assert.deepEqual(summarizeTracks([{ id: "x", boxes: [] }]), []);
+});
+
+test("a bag whose box briefly stretched over the whole pile keeps its own close-up (real SAM output)", () => {
+  // On this run SAM stretched one bag's box to 857x403 px for a few frames; the bag itself is ~370x220.
+  const fx = load("sam-track-stall-bags-merge-glitch.json");
+  const units = summarizeTracks(splitJumps(fx.tracks, stallClip));
+  const biggest = Math.max(...units.map((u) => (u.box.right - u.box.left) * (u.box.bottom - u.box.top)));
+  assert.ok(biggest < 120_000, `largest unit view is ${biggest} px, not the whole pile`);
+  assert.equal(filterTracks(units, 0.5, stallClip).kept.length, 6);
 });
 
 test("a unit seen in only one frame is set aside", () => {

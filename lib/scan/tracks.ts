@@ -65,16 +65,32 @@ export function splitJumps(tracks: readonly Track[], clip: { width: number; heig
   return out;
 }
 
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? (sorted[mid] as number) : ((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2;
+}
+
+/**
+ * Reduces each track to its clearest view: the largest box among frames where
+ * the unit has its usual size. For a few frames SAM sometimes stretches one
+ * unit's box over a whole pile; those frames are ignored, so the close-up and
+ * size used for filtering show one unit, not the pile.
+ */
 export function summarizeTracks(tracks: readonly Track[]): UnitTrack[] {
   const units: UnitTrack[] = [];
   for (const track of tracks) {
     if (track.boxes.length === 0) continue;
-    let best = track.boxes[0] as Track["boxes"][number];
+    const typical = median(track.boxes.map((b) => boxArea(b.b)));
+    const usual = track.boxes.filter((b) => {
+      const a = boxArea(b.b);
+      return a >= typical * 0.5 && a <= typical * 1.6;
+    });
+    const pool = usual.length > 0 ? usual : track.boxes;
+    let best = pool[0] as Track["boxes"][number];
+    for (const box of pool) if (boxArea(box.b) > boxArea(best.b)) best = box;
     let confidence: number | null = null;
-    for (const box of track.boxes) {
-      if (boxArea(box.b) > boxArea(best.b)) best = box;
-      if (box.c !== null) confidence = Math.max(confidence ?? 0, box.c);
-    }
+    for (const box of track.boxes) if (box.c !== null) confidence = Math.max(confidence ?? 0, box.c);
     const frames = track.boxes.map((b) => b.f);
     units.push({
       id: track.id,

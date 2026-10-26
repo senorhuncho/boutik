@@ -1,6 +1,7 @@
 import {
   decodeMaskToSVGPath,
   parseImageStream,
+  parseVideoStream,
   recordsOfKind,
   type ResponsesEvent,
 } from "@meta-sam/parser";
@@ -106,4 +107,78 @@ export async function segmentImage(imageDataUrl: string, concept: string): Promi
   });
 
   return { detections, outcome: result.outcome.status, warnings };
+}
+
+export interface TrackBox {
+  /** Frame index in the uploaded clip. */
+  f: number;
+  /** left, top, right, bottom in clip pixels. */
+  b: [number, number, number, number];
+  c: number | null;
+}
+
+export interface Track {
+  id: string;
+  /** Every frame the unit was seen in, in order. */
+  boxes: TrackBox[];
+}
+
+export interface VideoSegmentResult {
+  tracks: Track[];
+  /** Highest frame index seen + 1. */
+  frames: number;
+  /** Most units SAM reported in any single frame (SAM tracks at most 16 per frame). */
+  maxPerFrame: number;
+  outcome: string;
+  warnings: string[];
+}
+
+/**
+ * Tracks every instance of one concept through a video with SAM 3.1. The same
+ * object id across frames is the same physical unit, so a unit seen at the
+ * start and again at the end of a pan is one track.
+ */
+export async function segmentVideo(videoDataUrl: string, concept: string): Promise<VideoSegmentResult> {
+  const input = [
+    {
+      type: "message",
+      role: "user",
+      content: [
+        { type: "input_text", text: concept },
+        { type: "input_video", video_url: videoDataUrl },
+      ],
+    },
+  ] as unknown as OpenAI.Responses.ResponseInput;
+
+  const stream = await meta().responses.create({
+    model: MODELS.segment,
+    stream: true,
+    metadata: { include_confidence: "true", mask_encoding: "one_bit" },
+    input,
+  });
+
+  const result = await parseVideoStream(normalizedEvents(stream)).finalResult;
+  const warnings = result.diagnostics.map((d) => `${d.severity}: ${d.message}`).slice(0, 10);
+  if (result.outcome.status !== "completed") warnings.unshift(`outcome: ${result.outcome.status}`);
+
+  const byId = new Map<string, TrackBox[]>();
+  const perFrame = new Map<number, number>();
+  let frames = 0;
+  for (const box of recordsOfKind(result.records, "box")) {
+    const f = box.frame?.frameIndex ?? 0;
+    frames = Math.max(frames, f + 1);
+    perFrame.set(f, (perFrame.get(f) ?? 0) + 1);
+    const list = byId.get(box.objectId) ?? [];
+    list.push({ f, b: [box.left, box.top, box.right, box.bottom], c: box.confidence ?? null });
+    byId.set(box.objectId, list);
+  }
+
+  const tracks: Track[] = [...byId].map(([id, boxes]) => ({ id, boxes: boxes.sort((a, b) => a.f - b.f) }));
+  return {
+    tracks,
+    frames,
+    maxPerFrame: Math.max(0, ...perFrame.values()),
+    outcome: result.outcome.status,
+    warnings,
+  };
 }

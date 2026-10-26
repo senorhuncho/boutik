@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cleanSamPrompt, normalizeIdentify, normalizePrices, transcriptionKeywords } from "../lib/scan/normalize.ts";
+import {
+  cleanSamPrompt,
+  isNoSpeech,
+  normalizeAssignments,
+  normalizeIdentify,
+  normalizePrices,
+  transcriptionKeywords,
+} from "../lib/scan/normalize.ts";
+import { groupForCounting } from "../lib/scan/grouping.ts";
 import { countAtThreshold, filterDetections, scoreMethods } from "../lib/scan/accuracy.ts";
 import type { Detection } from "../lib/scan/types.ts";
 
@@ -154,4 +162,47 @@ test("filterDetections drops a whole-stack box and keeps same-size units", () =>
 test("filterDetections leaves very small sets alone", () => {
   const two = [boxed("a", 0.9, 0, 0, 100, 100), boxed("b", 0.9, 0, 0, 10, 10)];
   assert.equal(filterDetections(two, 0.5).kept.length, 2);
+});
+
+test("groupForCounting shares one search per shape and frame, sorting among all look-alikes", () => {
+  const p = (samPrompt: string, bestFrame: number) => ({ samPrompt, samFallback: "box", bestFrame });
+  // The Indomie warehouse: three carton flavours (best frames 0, 3, 0) and one bag product.
+  const groups = groupForCounting([p("carton", 0), p("Carton", 3), p("carton", 0), p("bag", 1)]);
+  assert.deepEqual(groups, [
+    { concept: "carton", fallback: "box", frame: 0, members: [0, 2], candidates: [0, 1, 2] },
+    { concept: "carton", fallback: "box", frame: 3, members: [1], candidates: [0, 1, 2] },
+    { concept: "bag", fallback: "box", frame: 1, members: [3], candidates: [3] },
+  ]);
+  assert.deepEqual(groupForCounting([p("", 0)]), [], "products with no shape are skipped");
+});
+
+test("transcriptionKeywords drops anything over 30 characters", () => {
+  const words = transcriptionKeywords([
+    { name: "Indomie Chicken Flavor Super Pack 40 packs", brand: "Indomie", keywords: ["indomie", "super pack", "nouilles"] },
+  ]);
+  assert.deepEqual(words, ["Indomie", "super pack", "nouilles"]);
+  assert.ok(words.every((w) => w.length <= 30));
+});
+
+test("isNoSpeech catches empty replies and model refusals", () => {
+  assert.equal(isNoSpeech(""), true);
+  assert.equal(isNoSpeech("[no speech]"), true);
+  assert.equal(
+    isNoSpeech(
+      "I don't have the ability to access, play, or hear audio recordings, and no audio file was included with your message, so I cannot provide a transcript.",
+    ),
+    true,
+  );
+  assert.equal(isNoSpeech("Rice na 5500 francs"), false);
+  assert.equal(isNoSpeech("No, the price is 2000"), false);
+});
+
+test("normalizeAssignments fills every label and rejects unknown products", () => {
+  const map = normalizeAssignments(
+    { units: [{ label: 1, productIndex: 2 }, { label: 2, productIndex: 7 }, { label: 3, productIndex: -1 }, { label: 9, productIndex: 0 }, "x"] },
+    4,
+    new Set([0, 1, 2]),
+  );
+  assert.deepEqual([...map], [[1, 2], [2, -1], [3, -1], [4, -1]]);
+  assert.deepEqual([...normalizeAssignments(null, 2, new Set([0]))], [[1, -1], [2, -1]]);
 });

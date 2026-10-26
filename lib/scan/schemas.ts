@@ -79,3 +79,23 @@ export const pricesSchema = {
     otherMentions: { type: "array", items: { type: "string" } },
   },
 } as const;
+
+export const assignSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["units"],
+  properties: {
+    units: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["label", "productIndex"],
+        properties: {
+          label: { type: "integer" },
+          productIndex: { type: "integer" },
+        },
+      },
+    },
+  },
+} as const;

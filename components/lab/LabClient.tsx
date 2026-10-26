@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
+import { drawNumberedBoxes } from "@/lib/media/annotate";
 import { extractAudio, extractKeyframes, loadVideo, type ExtractedAudio, type ExtractedFrame } from "@/lib/media/browser";
 import {
   countAtThreshold,
@@ -10,6 +11,7 @@ import {
   type DropReason,
   type MethodScore,
 } from "@/lib/scan/accuracy";
+import { groupForCounting } from "@/lib/scan/grouping";
 import type { CountResult, IdentifyResult, PricesResult, Product } from "@/lib/scan/types";
 import { FrameOverlay } from "./FrameOverlay";
 
@@ -21,13 +23,33 @@ interface StepState {
   ms?: number;
 }
 
-type CountState = { state: "loading" } | { state: "done"; result: CountResult } | { state: "error"; error: string };
+/** How a product's units were found: alone, or shared with look-alike products and sorted by Muse Spark. */
+interface Sharing {
+  products: number;
+  /** Units SAM found for the whole look-alike group. */
+  groupFound: number;
+  sortMs?: number;
+  sortError?: string;
+}
+
+type CountState =
+  | { state: "loading" }
+  | { state: "done"; result: CountResult; sharing: Sharing | null }
+  | { state: "error"; error: string };
+
+interface AssignResponse {
+  assignments: Record<string, number>;
+  model: string;
+  ms: number;
+}
+
+const MAX_SORT_LABELS = 80;
 
 const STEP_LABELS: Record<StepKey, string> = {
   read: "Reading the video on this phone",
   identify: "Finding products · Muse Spark",
   prices: "Listening for prices · Voice Transcribe + Muse Spark",
-  count: "Counting each product · SAM 3.1",
+  count: "Counting each product · SAM 3.1 + Muse Spark",
 };
 
 const INITIAL_STEPS: Record<StepKey, StepState> = {
@@ -99,42 +121,90 @@ export function LabClient() {
   const countProducts = useCallback(
     async (products: Product[], extracted: ExtractedFrame[], id: number) => {
       const started = Date.now();
-      setStep("count", { status: "running", note: `0 of ${products.length}` });
+      const groups = groupForCounting(products);
+      setStep("count", { status: "running", note: `0 of ${groups.length} searches` });
       setCounts(Object.fromEntries(products.map((_, i) => [i, { state: "loading" } as CountState])));
       let finished = 0;
       let failed = 0;
-      const queue = products.map((p, i) => ({ p, i }));
+      const queue = [...groups];
 
       const worker = async () => {
-        for (let job = queue.shift(); job; job = queue.shift()) {
-          const frame = extracted[job.p.bestFrame] ?? extracted[0];
+        for (let group = queue.shift(); group; group = queue.shift()) {
+          const frame = extracted[group.frame] ?? extracted[0];
           if (!frame) continue;
-          const form = new FormData();
-          form.append("frame", frame.blob, `frame-${frame.index}.jpg`);
-          form.append("concept", job.p.samPrompt);
-          form.append("fallback", job.p.samFallback);
-          form.append("productIndex", String(job.i));
-          form.append("frameIndex", String(frame.index));
-          let next: CountState;
+          const updates: Record<number, CountState> = {};
           try {
-            next = { state: "done", result: await postForm<CountResult>("/api/scan/count", form) };
+            const form = new FormData();
+            form.append("frame", frame.blob, `frame-${frame.index}.jpg`);
+            form.append("concept", group.concept);
+            form.append("fallback", group.fallback);
+            form.append("productIndex", String(group.members[0] ?? -1));
+            form.append("frameIndex", String(frame.index));
+            const found = await postForm<CountResult>("/api/scan/count", form);
+
+            if (group.candidates.length === 1) {
+              const only = group.members[0] as number;
+              updates[only] = { state: "done", result: { ...found, productIndex: only }, sharing: null };
+            } else {
+              // Look-alike products share one SAM search; Muse Spark reads each numbered unit.
+              const labelled = [...found.detections]
+                .sort((a, b) => (b.confidence ?? 1) - (a.confidence ?? 1))
+                .slice(0, MAX_SORT_LABELS);
+              let byId = new Map<string, number>();
+              let sortMs: number | undefined;
+              let sortError: string | undefined;
+              if (labelled.length > 0) {
+                try {
+                  const annotated = await drawNumberedBoxes(frame.blob, labelled);
+                  const sortForm = new FormData();
+                  sortForm.append("image", annotated, "numbered.jpg");
+                  sortForm.append("labels", String(labelled.length));
+                  sortForm.append(
+                    "products",
+                    JSON.stringify(
+                      group.candidates.map((i) => ({ index: i, name: products[i]?.name, brand: products[i]?.brand })),
+                    ),
+                  );
+                  const sorted = await postForm<AssignResponse>("/api/scan/assign", sortForm);
+                  sortMs = sorted.ms;
+                  byId = new Map(labelled.map((d, k) => [d.id, sorted.assignments[String(k + 1)] ?? -1]));
+                } catch (error) {
+                  sortError = error instanceof Error ? error.message : "Sorting failed";
+                }
+              }
+              for (const member of group.members) {
+                updates[member] = {
+                  state: "done",
+                  result: {
+                    ...found,
+                    productIndex: member,
+                    detections: found.detections.filter((d) => byId.get(d.id) === member),
+                  },
+                  sharing: { products: group.candidates.length, groupFound: found.detections.length, sortMs, sortError },
+                };
+              }
+            }
           } catch (error) {
-            failed++;
-            next = { state: "error", error: error instanceof Error ? error.message : "failed" };
+            failed += group.members.length;
+            const message = error instanceof Error ? error.message : "failed";
+            for (const member of group.members) updates[member] = { state: "error", error: message };
           }
           if (runId.current !== id) return;
           finished++;
-          const index = job.i;
-          setCounts((prev) => ({ ...prev, [index]: next }));
-          setStep("count", { status: "running", note: `${finished} of ${products.length}` });
+          setCounts((prev) => ({ ...prev, ...updates }));
+          setStep("count", { status: "running", note: `${finished} of ${groups.length} searches` });
         }
       };
 
-      await Promise.all(Array.from({ length: Math.min(COUNT_CONCURRENCY, products.length) }, worker));
+      await Promise.all(Array.from({ length: Math.min(COUNT_CONCURRENCY, groups.length) }, worker));
       if (runId.current !== id) return;
+      const shared = groups.filter((g) => g.candidates.length > 1).length;
       setStep("count", {
         status: failed === products.length && products.length > 0 ? "error" : "done",
-        note: failed ? `${failed} failed` : `${products.length} products`,
+        note:
+          (failed ? `${failed} failed · ` : "") +
+          `${products.length} products, ${groups.length} SAM search${groups.length === 1 ? "" : "es"}` +
+          (shared ? ` · look-alikes sorted by Muse Spark` : ""),
         ms: Date.now() - started,
       });
     },
@@ -285,6 +355,7 @@ export function LabClient() {
           v.state === "done"
             ? {
                 ...v.result,
+                sharing: v.sharing,
                 countAtThreshold: countAtThreshold(v.result.detections, threshold),
                 setAside: filterDetections(v.result.detections, threshold).dropped.map((x) => ({
                   id: x.detection.id,
@@ -579,6 +650,13 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
           </label>
         </dl>
 
+        {count?.state === "done" && count.sharing ? (
+          <p className="mt-3 text-sm text-[var(--color-muted)]">
+            {count.sharing.sortError
+              ? `Looks like ${count.sharing.products - 1} other product${count.sharing.products > 2 ? "s" : ""}; sorting failed: ${count.sharing.sortError}`
+              : `Looks like ${count.sharing.products - 1} other product${count.sharing.products > 2 ? "s" : ""}: SAM found ${count.sharing.groupFound} units by shape, Muse Spark sorted them by packaging${count.sharing.sortMs ? ` in ${formatMs(count.sharing.sortMs)}` : ""}.`}
+          </p>
+        ) : null}
         {filtered && filtered.dropped.length > 0 ? (
           <p className="mt-3 text-sm text-[var(--color-muted)]">Set aside: {describeDropped(filtered.dropped)}</p>
         ) : null}

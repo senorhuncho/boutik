@@ -16,6 +16,19 @@ export async function transcribeWav(
   wav: Blob,
   options: { keywords?: string[]; languageBias?: string[] } = {},
 ): Promise<Transcript> {
+  const first = await transcribeOnce(wav, options);
+  // Keyword rules are not documented; if Meta rejects ours, still get a transcript without them.
+  if (first.error && options.keywords?.length && /keyword/i.test(first.error)) {
+    const retry = await transcribeOnce(wav, { ...options, keywords: [] });
+    return { ...retry, ms: first.ms + retry.ms, error: retry.error };
+  }
+  return first;
+}
+
+async function transcribeOnce(
+  wav: Blob,
+  options: { keywords?: string[]; languageBias?: string[] },
+): Promise<Transcript> {
   const started = Date.now();
   const request: Record<string, unknown> = {
     model: MODELS.transcribe,

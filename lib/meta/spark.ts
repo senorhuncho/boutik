@@ -1,7 +1,7 @@
 import type OpenAI from "openai";
 import { MODELS, meta } from "./client";
-import { identifySchema, pricesSchema } from "@/lib/scan/schemas";
-import { normalizeIdentify, normalizePrices } from "@/lib/scan/normalize";
+import { assignSchema, identifySchema, pricesSchema } from "@/lib/scan/schemas";
+import { NO_SPEECH, isNoSpeech, normalizeAssignments, normalizeIdentify, normalizePrices } from "@/lib/scan/normalize";
 import type { PriceMatch, Product, StallSummary, Transcript } from "@/lib/scan/types";
 
 type Part = OpenAI.Chat.Completions.ChatCompletionContentPart;
@@ -16,11 +16,13 @@ For each product:
 - name: what a buyer would search for, with size if visible. Use the language on the packaging, else English.
   Use local market names: in Cameroon and Nigeria, plantains (large, cooked) are not sweet bananas.
 - brand: the brand printed on the pack, or "" if none is visible.
-- samPrompt: a short English noun phrase naming ONE physical unit as it looks, for an object detector.
-  Examples: "bag of rice", "bottle of cooking oil", "tin of tomato paste", "bunch of plantains", "carton".
-  No brands, counts, colours of the stall, or lists.
-- samFallback: a plainer phrase for the same unit's shape, used if the first finds nothing
-  (for example "bunch of bananas" for plantains, "sack" for a bag of rice, "bottle" for oil).
+- samPrompt: the plainest everyday English noun (one or two words) for the physical shape of ONE unit, for an
+  object detector that only sees shapes. Examples: "carton", "bag", "sack", "bottle", "tin", "jerrycan",
+  "crate", "sachet", "bunch of plantains", "pineapple", "tomato". Never describe contents, brand or flavour:
+  "carton of instant noodles" finds nothing, "carton" works. Products that look alike (the same carton in
+  different flavours) must share the same samPrompt; a later step tells them apart.
+- samFallback: a synonym for the same shape, tried if the first finds nothing ("box" for carton, "sack" for
+  bag, "bunch of bananas" for plantains, "container" for a tub).
 - unit: the selling unit (bag, bottle, carton, tin, bunch, heap, basin, piece...).
 - estimatedCount: how many units are visible across the video. Do not double count units that appear in
   several frames because the camera moved.
@@ -115,7 +117,8 @@ export async function transcribeWithSpark(wavBase64: string): Promise<Transcript
               text:
                 "Transcribe exactly what is said in this recording from a market in Cameroon. " +
                 "Speech may mix Cameroonian Pidgin, French and English. Keep the original words; " +
-                "write numbers as digits. Reply with the transcript only.",
+                "write numbers as digits. Reply with the transcript only. " +
+                `If nobody speaks (only noise or music), reply exactly: ${NO_SPEECH}`,
             },
             { type: "input_audio", input_audio: { data: wavBase64, format: "wav" } },
           ],
@@ -124,10 +127,11 @@ export async function transcribeWithSpark(wavBase64: string): Promise<Transcript
       max_completion_tokens: 4000,
       reasoning_effort: "low",
     });
+    const text = (completion.choices[0]?.message.content ?? "").trim();
     return {
       source: "spark-audio",
       model: MODELS.audio,
-      text: (completion.choices[0]?.message.content ?? "").trim(),
+      text: isNoSpeech(text) ? "" : text,
       ms: Date.now() - started,
     };
   } catch (error) {
@@ -175,4 +179,46 @@ export async function extractPrices(
 
   const raw = parseJson(completion.choices[0]?.message.content);
   return { ...normalizePrices(raw, products.length), model: MODELS.vision };
+}
+
+const ASSIGN_INSTRUCTIONS = `An object detector found units on a market stall and drew a numbered box around each.
+Several products look alike (for example the same carton in different flavours), so the detector cannot tell
+them apart. Look at what is printed or visible on each numbered unit and say which product it is.
+
+For every number shown, give productIndex: the index of the matching product from the list, or -1 if the box
+is not one unit of any listed product (two units in one box, a shelf, a person, an empty space, or a product
+not in the list). Every number must appear exactly once.`;
+
+/**
+ * SAM finds units by shape; Muse Spark reads each numbered unit and says which
+ * product it is. Returns a map from label (1-based) to product index, -1 for none.
+ */
+export async function assignDetections(
+  annotatedDataUrl: string,
+  products: { index: number; name: string; brand: string }[],
+  labelCount: number,
+): Promise<{ assignments: Map<number, number>; model: string }> {
+  const list = products
+    .map((p) => `${p.index}. ${p.name}${p.brand ? ` (${p.brand})` : ""}`)
+    .join("\n");
+  const completion = await meta().chat.completions.create({
+    model: MODELS.vision,
+    messages: [
+      { role: "system", content: ASSIGN_INSTRUCTIONS },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: `Products:\n${list}\n\nThe image has boxes numbered 1 to ${labelCount}.` },
+          { type: "image_url", image_url: { url: annotatedDataUrl } },
+        ],
+      },
+    ],
+    response_format: jsonFormat("unit_assignments", assignSchema),
+    reasoning_effort: "low",
+  });
+  const raw = parseJson(completion.choices[0]?.message.content);
+  return {
+    assignments: normalizeAssignments(raw, labelCount, new Set(products.map((p) => p.index))),
+    model: MODELS.vision,
+  };
 }

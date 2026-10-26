@@ -14,6 +14,7 @@ List every distinct product offered for sale. Treat different sizes or brands as
 
 For each product:
 - name: what a buyer would search for, with size if visible. Use the language on the packaging, else English.
+  Use local market names: in Cameroon and Nigeria, plantains (large, cooked) are not sweet bananas.
 - brand: the brand printed on the pack, or "" if none is visible.
 - samPrompt: a short English noun phrase naming ONE physical unit as it looks, for an object detector.
   Examples: "bag of rice", "bottle of cooking oil", "tin of tomato paste", "bunch of plantains", "carton".
@@ -37,6 +38,9 @@ written as words ("deux mille cinq cents", "twenty-five thousand", "25k", "2 500
 
 For each price the trader states:
 - productIndex: the index of the matching product in the list, or -1 if it matches none.
+  Match by meaning, not spelling: traders use local names, French and Pidgin words, and loose names
+  ("plantain" or "banane" for a bunch of plantains or bananas, "huile" for oil, "riz" for rice,
+  a brand name for the product). Pick the closest product that is plausibly the same thing.
 - productName: the product as the trader named it.
 - amount: the price as a plain number in the stated currency. "25 thousand" is 25000.
   Cameroon uses FCFA (XAF); Nigeria uses naira (NGN).
@@ -134,7 +138,7 @@ export async function transcribeWithSpark(wavBase64: string): Promise<Transcript
 }
 
 export async function extractPrices(
-  products: Pick<Product, "name" | "brand" | "unit">[],
+  products: Pick<Product, "name" | "brand" | "unit" | "keywords">[],
   transcripts: Transcript[],
 ): Promise<{ prices: PriceMatch[]; otherMentions: string[]; model: string }> {
   const usable = transcripts.filter((t) => t.text.trim().length > 0);
@@ -143,7 +147,10 @@ export async function extractPrices(
   }
 
   const productList = products
-    .map((p, i) => `${i}. ${p.name}${p.brand ? ` (${p.brand})` : ""}, sold per ${p.unit}`)
+    .map((p, i) => {
+      const also = p.keywords.length ? `; also called ${p.keywords.join(", ")}` : "";
+      return `${i}. ${p.name}${p.brand ? ` (${p.brand})` : ""}, sold per ${p.unit}${also}`;
+    })
     .join("\n");
   const transcriptText = usable
     .map((t, i) => `Transcript ${String.fromCharCode(65 + i)}:\n${t.text}`)

@@ -20,10 +20,20 @@ export async function POST(request: Request) {
     const productIndex = Number(form.get("productIndex") ?? -1);
     const frameIndex = Number(form.get("frameIndex") ?? 0);
 
-    const result = await segmentImage(await toDataUrl(frame), concept);
+    const fallback = cleanSamPrompt(form.get("fallback"), "");
+    const image = await toDataUrl(frame);
+
+    let used = concept;
+    let result = await segmentImage(image, concept);
+    if (result.detections.length === 0 && fallback && fallback !== concept) {
+      used = fallback;
+      result = await segmentImage(image, fallback);
+    }
+
     const body: CountResult = {
       productIndex: Number.isFinite(productIndex) ? productIndex : -1,
-      concept,
+      concept: used,
+      usedFallback: used !== concept,
       frame: Number.isFinite(frameIndex) ? frameIndex : 0,
       detections: result.detections,
       outcome: result.outcome,

@@ -19,6 +19,8 @@ For each product:
 - samPrompt: a short English noun phrase naming ONE physical unit as it looks, for an object detector.
   Examples: "bag of rice", "bottle of cooking oil", "tin of tomato paste", "bunch of plantains", "carton".
   No brands, counts, colours of the stall, or lists.
+- samFallback: a plainer phrase for the same unit's shape, used if the first finds nothing
+  (for example "bunch of bananas" for plantains, "sack" for a bag of rice, "bottle" for oil).
 - unit: the selling unit (bag, bottle, carton, tin, bunch, heap, basin, piece...).
 - estimatedCount: how many units are visible across the video. Do not double count units that appear in
   several frames because the camera moved.
@@ -49,6 +51,8 @@ For each price the trader states:
 - quote: the exact words from the transcript that state this price.
 - confidence: high only when product and amount are both unambiguous.
 
+List each spoken price once, even when both transcripts contain it. If the transcripts disagree on an
+amount, give the more likely one with confidence low and note the other reading in otherMentions.
 Put anything else useful the trader said (discounts, stock running out, wholesale offers) in otherMentions.
 Never invent prices that are not in a transcript.`;
 

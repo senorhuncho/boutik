@@ -2,7 +2,14 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { extractAudio, extractKeyframes, loadVideo, type ExtractedAudio, type ExtractedFrame } from "@/lib/media/browser";
-import { countAtThreshold, scoreMethods, type AccuracyRow, type MethodScore } from "@/lib/scan/accuracy";
+import {
+  countAtThreshold,
+  filterDetections,
+  scoreMethods,
+  type AccuracyRow,
+  type DropReason,
+  type MethodScore,
+} from "@/lib/scan/accuracy";
 import type { CountResult, IdentifyResult, PricesResult, Product } from "@/lib/scan/types";
 import { FrameOverlay } from "./FrameOverlay";
 
@@ -105,6 +112,7 @@ export function LabClient() {
           const form = new FormData();
           form.append("frame", frame.blob, `frame-${frame.index}.jpg`);
           form.append("concept", job.p.samPrompt);
+          form.append("fallback", job.p.samFallback);
           form.append("productIndex", String(job.i));
           form.append("frameIndex", String(frame.index));
           let next: CountState;
@@ -185,12 +193,15 @@ export function LabClient() {
         if (runId.current !== id) return;
         setFrames(extracted);
         setAudio(sound);
-        const uploadKb = Math.round(
-          (extracted.reduce((sum, f) => sum + f.blob.size, 0) + (sound?.blob.size ?? 0)) / 1024,
-        );
+        const uploadBytes = extracted.reduce((sum, f) => sum + f.blob.size, 0) + (sound?.blob.size ?? 0);
+        const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
         setStep("read", {
           status: "done",
-          note: `${extracted.length} frames${sound ? `, ${sound.seconds.toFixed(0)} s of sound` : ", no sound"} · ${uploadKb} KB to upload instead of ${Math.round(file.size / 1024 / 1024)} MB`,
+          note:
+            `${extracted.length} frames${sound ? `, ${sound.seconds.toFixed(0)} s of sound` : ", no sound"} · ` +
+            (uploadBytes < file.size
+              ? `uploading ${mb(uploadBytes)} instead of the ${mb(file.size)} video`
+              : `uploading ${mb(uploadBytes)}`),
           ms: Date.now() - started,
         });
 
@@ -275,6 +286,10 @@ export function LabClient() {
             ? {
                 ...v.result,
                 countAtThreshold: countAtThreshold(v.result.detections, threshold),
+                setAside: filterDetections(v.result.detections, threshold).dropped.map((x) => ({
+                  id: x.detection.id,
+                  reason: x.reason,
+                })),
                 detections: v.result.detections.map(({ id, box, confidence }) => ({ id, box, confidence })),
               }
             : v,
@@ -488,19 +503,19 @@ interface ProductCardProps {
 }
 
 function ProductCard({ index, product, frame, count, threshold, prices, realCount, onRealCount }: ProductCardProps) {
-  const samCount = count?.state === "done" ? countAtThreshold(count.result.detections, threshold) : null;
+  const filtered = count?.state === "done" ? filterDetections(count.result.detections, threshold) : null;
+  const samCount = filtered ? filtered.kept.length : null;
   const real = realCount.trim() === "" ? null : Number(realCount);
 
   return (
     <article className="overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]">
       {frame ? (
-        count?.state === "done" ? (
+        filtered ? (
           <FrameOverlay
             src={frame.url}
             width={frame.width}
             height={frame.height}
-            detections={count.result.detections}
-            threshold={threshold}
+            filtered={filtered}
             alt={`${product.name} in frame ${frame.index}`}
           />
         ) : (
@@ -516,8 +531,9 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
               {index + 1}. {product.name}
             </h3>
             <p className="mt-0.5 text-sm text-[var(--color-muted)]">
-              {product.brand ? `${product.brand} · ` : ""}per {product.unit} · SAM looked for “{product.samPrompt}” in frame #
-              {product.bestFrame}
+              {product.brand ? `${product.brand} · ` : ""}per {product.unit} · SAM looked for “
+              {count?.state === "done" ? count.result.concept : product.samPrompt}” in frame #{product.bestFrame}
+              {count?.state === "done" && count.result.usedFallback ? ` (“${product.samPrompt}” found nothing)` : ""}
             </p>
           </div>
           {prices[0] ? (
@@ -539,7 +555,7 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
               {count?.state === "loading" ? "…" : count?.state === "error" ? "!" : (samCount ?? "–")}
             </dd>
             <dd className="text-[11px] text-[var(--color-muted)]">
-              {count?.state === "done" ? `${count.result.detections.length} found · ${formatMs(count.result.ms)}` : ""}
+              {count?.state === "done" ? `of ${count.result.detections.length} found · ${formatMs(count.result.ms)}` : ""}
             </dd>
           </div>
           <label className="rounded-xl bg-[var(--color-paper)] p-2.5">
@@ -563,6 +579,9 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
           </label>
         </dl>
 
+        {filtered && filtered.dropped.length > 0 ? (
+          <p className="mt-3 text-sm text-[var(--color-muted)]">Set aside: {describeDropped(filtered.dropped)}</p>
+        ) : null}
         {product.countingNotes ? <p className="mt-3 text-sm text-[var(--color-muted)]">{product.countingNotes}</p> : null}
         {count?.state === "error" ? <p className="mt-3 text-sm text-[var(--color-bad)]">{count.error}</p> : null}
         {count?.state === "done" && count.result.warnings.length ? (
@@ -581,6 +600,18 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
       </div>
     </article>
   );
+}
+
+const DROP_LABELS: Record<DropReason, string> = {
+  "too small": "too small, probably further back",
+  "too large": "too large, probably a whole stack",
+  "low confidence": "below the confidence line",
+};
+
+function describeDropped(dropped: { reason: DropReason }[]): string {
+  const counts = new Map<DropReason, number>();
+  for (const { reason } of dropped) counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  return [...counts.entries()].map(([reason, n]) => `${n} ${DROP_LABELS[reason]}`).join(" · ");
 }
 
 function PricesPanel({ prices, products }: { prices: PricesResult; products: Product[] }) {

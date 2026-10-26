@@ -13,6 +13,8 @@ export interface Product {
   brand: string;
   /** Short English noun phrase for one physical unit, sent to SAM. */
   samPrompt: string;
+  /** Plainer description of the same unit's shape, tried when samPrompt finds nothing. */
+  samFallback: string;
   /** Selling unit: bag, bottle, carton, bunch, heap, tin... */
   unit: string;
   /** Muse Spark's own estimate of how many units are visible. */
@@ -71,7 +73,9 @@ export interface Detection {
 
 export interface CountResult {
   productIndex: number;
+  /** The phrase that produced these detections (the fallback when the first found nothing). */
   concept: string;
+  usedFallback: boolean;
   frame: number;
   detections: Detection[];
   outcome: string;

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { cleanSamPrompt, normalizeIdentify, normalizePrices, transcriptionKeywords } from "../lib/scan/normalize.ts";
-import { countAtThreshold, scoreMethods } from "../lib/scan/accuracy.ts";
+import { countAtThreshold, filterDetections, scoreMethods } from "../lib/scan/accuracy.ts";
 import type { Detection } from "../lib/scan/types.ts";
 
 test("cleanSamPrompt keeps one short noun phrase", () => {
@@ -21,6 +21,7 @@ test("normalizeIdentify clamps values and drops junk", () => {
         name: "Rice 5 kg",
         brand: "Uncle Ben's",
         samPrompt: "bag of rice, sack",
+        samFallback: "Sack",
         unit: "bag",
         estimatedCount: 12.6,
         countConfidence: "medium",
@@ -42,9 +43,11 @@ test("normalizeIdentify clamps values and drops junk", () => {
   assert.equal(rice?.estimatedCount, 13);
   assert.equal(rice?.bestFrame, 5, "frame index clamped to last frame");
   assert.equal(rice?.samPrompt, "bag of rice");
+  assert.equal(rice?.samFallback, "sack");
   assert.deepEqual(rice?.keywords, ["riz", "rice"]);
   assert.equal(oil?.unit, "item");
   assert.equal(oil?.samPrompt, "item");
+  assert.equal(oil?.samFallback, "item", "missing fallback falls back to the unit");
   assert.equal(oil?.estimatedCount, 0);
   assert.equal(oil?.bestFrame, 0);
   assert.equal(oil?.countConfidence, "low");
@@ -111,4 +114,44 @@ test("scoreMethods computes exact, close and error rates", () => {
   assert.equal(sam?.exact, 0.5);
   assert.equal(sam?.close, 1);
   assert.equal(scoreMethods([]).spark, null);
+});
+
+function boxed(id: string, confidence: number, left: number, top: number, right: number, bottom: number): Detection {
+  return { id, box: { left, top, right, bottom }, confidence, maskPath: null, maskBounds: null, maskSize: null };
+}
+
+test("filterDetections sets aside background matches (real SAM output, 6 bags of rice)", () => {
+  // SAM 3.1 on a panned stall frame: six real bags plus five bags on a stall further back.
+  const rice = [
+    boxed("0", 0.582, 789, 100, 882, 168),
+    boxed("1", 0.71, 434, 83, 751, 378),
+    boxed("2", 0.706, 223, 369, 704, 661),
+    boxed("3", 0.704, 634, 378, 1082, 679),
+    boxed("4", 0.578, 884, 17, 982, 67),
+    boxed("5", 0.71, 0, 351, 408, 659),
+    boxed("6", 0.559, 784, 0, 887, 111),
+    boxed("7", 0.706, 717, 112, 995, 404),
+    boxed("8", 0.723, 154, 102, 476, 384),
+    boxed("9", 0.578, 885, 57, 981, 97),
+    boxed("10", 0.546, 884, 90, 952, 125),
+  ];
+  const result = filterDetections(rice, 0.5);
+  assert.deepEqual(result.kept.map((d) => d.id).sort(), ["1", "2", "3", "5", "7", "8"]);
+  assert.equal(result.dropped.length, 5);
+  assert.ok(result.dropped.every((d) => d.reason === "too small"));
+  assert.equal(countAtThreshold(rice, 0.5), 6);
+  assert.equal(filterDetections(rice, 0.5, { sizeFilter: false }).kept.length, 11);
+});
+
+test("filterDetections drops a whole-stack box and keeps same-size units", () => {
+  const units = [0, 1, 2, 3].map((i) => boxed(String(i), 0.9, i * 100, 0, i * 100 + 90, 200));
+  const stack = boxed("stack", 0.8, 0, 0, 400, 900);
+  const result = filterDetections([...units, stack], 0.5);
+  assert.equal(result.kept.length, 4);
+  assert.deepEqual(result.dropped.map((d) => [d.detection.id, d.reason]), [["stack", "too large"]]);
+});
+
+test("filterDetections leaves very small sets alone", () => {
+  const two = [boxed("a", 0.9, 0, 0, 100, 100), boxed("b", 0.9, 0, 0, 10, 10)];
+  assert.equal(filterDetections(two, 0.5).kept.length, 2);
 });

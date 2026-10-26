@@ -79,6 +79,7 @@ export function normalizeIdentify(
       name,
       brand: text(item.brand, 60),
       samPrompt: cleanSamPrompt(item.samPrompt, unit),
+      samFallback: cleanSamPrompt(item.samFallback, unit),
       unit,
       estimatedCount: int(item.estimatedCount, 0, 5000, 0),
       countConfidence: oneOf(item.countConfidence, CONFIDENCE, "low"),

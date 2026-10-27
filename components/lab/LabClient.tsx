@@ -98,12 +98,12 @@ export function LabClient() {
   }, [frames]);
 
   const countProducts = useCallback(
-    async (products: Product[], extracted: ExtractedFrame[], clip: TrackingClip | null, id: number) => {
+    async (products: Product[], extracted: ExtractedFrame[], clip: TrackingClip | null, noClip: string, id: number) => {
       const started = Date.now();
       const shapes = shapeGroups(products);
       setStep("count", { status: "running", note: `0 of ${shapes.length} shapes` });
       setCounts(Object.fromEntries(products.map((_, i) => [i, { state: "loading" } as CountState])));
-      const ctx = { products, frames: extracted, clip, video: videoRef.current, urls: urlsRef.current };
+      const ctx = { products, frames: extracted, clip, noClip, video: videoRef.current, urls: urlsRef.current };
       let finished = 0;
       let failed = 0;
       const queue = [...shapes];
@@ -210,27 +210,38 @@ export function LabClient() {
         // While Muse Spark looks at the frames, the phone makes the small clip SAM will track units in.
         const clipStarted = Date.now();
         setStep("clip", { status: "running" });
-        const clipJob = encodeTrackingClip(element, (done, total) =>
-          setStep("clip", { status: "running", note: `${done} of ${total} frames` }),
+        const clipJob: Promise<{ clip: TrackingClip | null; why: string }> = encodeTrackingClip(
+          element,
+          (done, total, attempt) =>
+            setStep("clip", {
+              status: "running",
+              note: attempt > 1 ? `Too big, making it smaller: ${done} of ${total} frames` : `${done} of ${total} frames`,
+            }),
         ).then(
           (made) => {
-            if (runId.current !== id) return made;
+            const why = "This phone could not make a tracking clip.";
+            if (runId.current !== id) return { clip: made, why };
             if (made) {
               const { blob, ...info } = made;
               setClipInfo({ ...info, bytes: blob.size });
+              const spacing =
+                Math.abs(info.step - 1 / info.fps) < 1e-6 ? `at ${info.fps} fps` : `one every ${info.step.toFixed(2)} s`;
               setStep("clip", {
                 status: "done",
-                note: `${info.frames} frames at ${info.fps} fps, ${info.width}×${info.height} · ${(blob.size / 1024 / 1024).toFixed(1)} MB`,
+                note: `${info.frames} frames ${spacing}, ${info.width}×${info.height} · ${(blob.size / 1024 / 1024).toFixed(1)} MB`,
                 ms: Date.now() - clipStarted,
               });
             } else {
               setStep("clip", { status: "skipped", note: "Not possible on this phone; counting on single frames instead" });
             }
-            return made;
+            return { clip: made, why };
           },
-          () => {
-            setStep("clip", { status: "skipped", note: "Not possible on this phone; counting on single frames instead" });
-            return null;
+          (error: unknown) => {
+            const reason = error instanceof Error ? error.message : "The tracking clip failed.";
+            if (runId.current === id) {
+              setStep("clip", { status: "skipped", note: `${reason} Counting on single frames instead.` });
+            }
+            return { clip: null, why: reason };
           },
         );
 
@@ -246,7 +257,7 @@ export function LabClient() {
         }
         await Promise.all([
           listenForPrices(sound, found.products, id),
-          clipJob.then((clip) => countProducts(found.products, extracted, clip, id)),
+          clipJob.then(({ clip, why }) => countProducts(found.products, extracted, clip, why, id)),
         ]);
       } catch (error) {
         if (runId.current !== id) return;
@@ -652,7 +663,7 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
                 : done?.method === "pan"
                   ? ` on every frame`
                   : ` in frame #${product.bestFrame}`}
-              {usedFallback ? ` (“${product.samPrompt}” found nothing)` : ""}
+              {usedFallback ? ` (“${product.samPrompt}” found too few)` : ""}
             </p>
           </div>
           {prices[0] ? (

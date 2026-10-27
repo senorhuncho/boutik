@@ -75,7 +75,7 @@ export interface Detection {
 
 export interface CountResult {
   productIndex: number;
-  /** The phrase that produced these detections (the fallback when the first found nothing). */
+  /** The phrase that produced these detections (another word when the first found almost nothing). */
   concept: string;
   usedFallback: boolean;
   frame: number;

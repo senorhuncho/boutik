@@ -36,7 +36,7 @@ export interface TrackedCount {
   faces: string[];
   /** Close-up of each unit's clearest view, by unit id. */
   tiles: Record<string, string>;
-  clip: { width: number; height: number; fps: number; frames: number };
+  clip: { width: number; height: number; fps: number; step: number; frames: number };
   ms: number;
 }
 
@@ -73,6 +73,8 @@ export interface CountContext {
   products: Product[];
   frames: ExtractedFrame[];
   clip: TrackingClip | null;
+  /** Why there is no clip, shown on each count. */
+  noClip?: string;
   video: HTMLVideoElement | null;
   /** Object URLs created here, so the caller can free them. */
   urls: string[];
@@ -207,7 +209,7 @@ async function countByFrames(shape: ShapeGroup, ctx: CountContext, why: string):
  */
 export async function countShape(shape: ShapeGroup, ctx: CountContext): Promise<Record<number, CountState>> {
   const { clip, video } = ctx;
-  if (!clip || !video) return countByFrames(shape, ctx, "This phone could not make a tracking clip.");
+  if (!clip || !video) return countByFrames(shape, ctx, ctx.noClip ?? "This phone could not make a tracking clip.");
 
   let tracked: TrackResult;
   try {
@@ -247,7 +249,7 @@ export async function countShape(shape: ShapeGroup, ctx: CountContext): Promise<
   const tileList: Tile[] = [];
   await withVideo(async () => {
     for (const [k, unit] of units.entries()) {
-      const blob = await cropUnit(video, unit.bestFrame / clip.fps, unit.box, clip.scale);
+      const blob = await cropUnit(video, unit.bestFrame * clip.step, unit.box, clip.scale);
       const url = URL.createObjectURL(blob);
       ctx.urls.push(url);
       tiles[unit.id] = url;
@@ -259,7 +261,7 @@ export async function countShape(shape: ShapeGroup, ctx: CountContext): Promise<
     concept: tracked.concept,
     usedFallback: tracked.usedFallback,
     tiles,
-    clip: { width: clip.width, height: clip.height, fps: clip.fps, frames: tracked.frames },
+    clip: { width: clip.width, height: clip.height, fps: clip.fps, step: clip.step, frames: tracked.frames },
     ms: tracked.ms,
   };
   const updates: Record<number, CountState> = {};
@@ -344,7 +346,7 @@ async function countAcrossFrames(
       const mine = single || !p.byId ? p.detections : p.detections.filter((d) => [candidate, -1].includes(p.byId?.get(d.id) ?? -1));
       return {
         frame: p.frame.index,
-        clipFrame: Math.round(p.frame.time * clip.fps),
+        clipFrame: Math.round(p.frame.time / clip.step),
         scale: p.frame.width / clip.width,
         detections: mine,
         rejected: p.byId ? mine.filter((d) => p.byId?.get(d.id) !== candidate).map((d) => d.id) : [],

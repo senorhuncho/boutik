@@ -57,8 +57,12 @@ For each price the trader states:
 - quote: the exact words from the transcript that state this price.
 - confidence: high only when product and amount are both unambiguous.
 
+List every spoken price, including prices of products that are not in the list (productIndex -1): the
+camera often misses products the trader names, and those still belong in the shop.
 List each spoken price once, even when both transcripts contain it. If the transcripts disagree on an
 amount, give the more likely one with confidence low and note the other reading in otherMentions.
+A number far too small for the product (45 for a tin of baby milk) was probably cut short ("four five"
+for 4 500): use the other transcript's reading when it has one, otherwise keep it with confidence low.
 Put anything else useful the trader said (discounts, stock running out, wholesale offers) in otherMentions.
 Never invent prices that are not in a transcript.`;
 
@@ -106,8 +110,20 @@ export async function identifyProducts(
   return { ...normalizeIdentify(raw, frames.length), model: MODELS.vision };
 }
 
-/** Second opinion on the audio: Muse Spark listens directly, which may cope better with Pidgin. */
+/**
+ * Second opinion on the audio: Muse Spark listens directly, which may cope
+ * better with Pidgin. It sometimes returns nothing for audio with clear speech
+ * (the same shop recording: empty at 60 s, full transcript at 30 s and 88 s),
+ * so an empty answer is asked once more. Silent videos never get here.
+ */
 export async function transcribeWithSpark(wavBase64: string): Promise<Transcript> {
+  const first = await listenWithSpark(wavBase64);
+  if (first.text || first.error) return first;
+  const second = await listenWithSpark(wavBase64);
+  return { ...second, ms: first.ms + second.ms };
+}
+
+async function listenWithSpark(wavBase64: string): Promise<Transcript> {
   const started = Date.now();
   try {
     const completion = await meta().chat.completions.create({

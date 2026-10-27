@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     const form = await readForm(request);
     const audio = form.get("audio");
     if (!(audio instanceof File) || audio.size === 0) throw new BadRequest("Missing audio.");
-    if (audio.size > LIMITS.maxAudioBytes) throw new BadRequest("Audio is too long. Keep videos under a minute.");
+    if (audio.size > LIMITS.maxAudioBytes) throw new BadRequest("Audio is too long. Keep videos under 90 seconds.");
 
     const raw = parseJsonField<unknown>(form.get("products"), "products");
     if (!Array.isArray(raw)) throw new BadRequest("products must be a list.");

@@ -56,7 +56,11 @@ export function candidateTimes(duration: number, segments: number, perSegment: n
   return out;
 }
 
-/** How many frames to sample for a video of this length (about one per 2 s, 4 to 8). */
+/**
+ * How many frames to sample for a video of this length: about one per 2 s, 4 to
+ * 12. A shop filmed shelf by shelf needs the higher end, or whole shelves fall
+ * between two frames.
+ */
 export function frameCountFor(duration: number): number {
-  return Math.min(8, Math.max(4, Math.round(duration / 2)));
+  return Math.min(12, Math.max(4, Math.round(duration / 2)));
 }

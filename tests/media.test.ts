@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { encodeWav, rms } from "../lib/media/wav.ts";
 import { candidateTimes, frameCountFor, laplacianVariance } from "../lib/media/sharpness.ts";
+import { clipTiming } from "../lib/media/clip.ts";
 
 test("encodeWav writes a valid 16-bit mono PCM header", () => {
   const samples = new Float32Array([0, 0.5, -0.5, 1, -1, 2]);
@@ -49,8 +50,21 @@ test("candidateTimes stays inside the video and covers each segment", () => {
   assert.deepEqual([...all].sort((a, b) => a - b), all, "times are in order");
 });
 
-test("frameCountFor clamps between 4 and 8", () => {
+test("frameCountFor clamps between 4 and 12", () => {
   assert.equal(frameCountFor(2), 4);
   assert.equal(frameCountFor(12), 6);
-  assert.equal(frameCountFor(60), 8);
+  assert.equal(frameCountFor(16), 8);
+  assert.equal(frameCountFor(88), 12);
+});
+
+test("the tracking clip keeps a whole frame rate and covers long videos to the end", () => {
+  // Jason's warehouse clip (12 s): unchanged, 96 frames at 8 fps.
+  assert.deepEqual(clipTiming(12.07), { fps: 8, frames: 96, step: 0.125 });
+  assert.equal(clipTiming(60).frames, 180);
+  // The 88 s shop video: 240 frames spread over the whole video, not just the first 80 s.
+  const shop = clipTiming(88.34);
+  assert.equal(shop.fps, 3);
+  assert.equal(shop.frames, 240);
+  assert.ok(Math.abs((shop.frames - 1) * shop.step - 88.34) < 0.5, `last frame at ${(shop.frames - 1) * shop.step} s`);
+  assert.ok(Number.isInteger(clipTiming(5).fps) && Number.isInteger(clipTiming(200).fps));
 });

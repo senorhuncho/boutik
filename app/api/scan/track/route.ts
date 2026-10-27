@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { MODELS } from "@/lib/meta/client";
 import { segmentVideo } from "@/lib/meta/sam";
+import { bestWord, samWords } from "@/lib/scan/ladder";
 import { cleanSamPrompt } from "@/lib/scan/normalize";
 import { BadRequest, assertLabAccess, jsonError, readForm } from "@/lib/scan/http";
 import type { TrackResult } from "@/lib/scan/types";
@@ -30,12 +31,11 @@ export async function POST(request: Request) {
     const fallback = cleanSamPrompt(form.get("fallback"), "");
 
     const dataUrl = `data:${clip.type};base64,${Buffer.from(await clip.arrayBuffer()).toString("base64")}`;
-    let used = concept;
-    let result = await segmentVideo(dataUrl, concept);
-    if (result.tracks.length === 0 && fallback && fallback !== concept) {
-      used = fallback;
-      result = await segmentVideo(dataUrl, fallback);
-    }
+    const { word: used, result } = await bestWord(
+      samWords(concept, fallback),
+      (word) => segmentVideo(dataUrl, word),
+      (r) => r.tracks.length,
+    );
     const body: TrackResult = {
       concept: used,
       usedFallback: used !== concept,

@@ -21,8 +21,11 @@ export interface ExtractedAudio {
 
 const FRAME_MAX_SIDE = 1280;
 const PROBE_SIDE = 192;
+/** Up to 12 frames go up in one request, and Vercel takes at most 4.5 MB per request. */
+const FRAME_BUDGET_BYTES = 320_000;
 const AUDIO_RATE = 16000;
-const MAX_AUDIO_SECONDS = 60;
+/** Same as the longest video the lab accepts, so prices spoken at the end are heard. */
+const MAX_AUDIO_SECONDS = 90;
 const MAX_AUDIO_FILE_BYTES = 250 * 1024 * 1024;
 
 export async function loadVideo(file: File): Promise<HTMLVideoElement> {
@@ -114,7 +117,8 @@ export async function extractKeyframes(
     if (!best) continue;
     await seek(video, best.time);
     ctx.drawImage(video, 0, 0, width, height);
-    const blob = await canvasToBlob(canvas, 0.85);
+    let blob = await canvasToBlob(canvas, 0.85);
+    if (blob.size > FRAME_BUDGET_BYTES) blob = await canvasToBlob(canvas, 0.7);
     frames.push({
       index: frames.length,
       time: best.time,

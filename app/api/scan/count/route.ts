@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { segmentImage } from "@/lib/meta/sam";
+import { bestWord, samWords } from "@/lib/scan/ladder";
 import { cleanSamPrompt } from "@/lib/scan/normalize";
 import { BadRequest, assertLabAccess, imageFile, jsonError, readForm, toDataUrl } from "@/lib/scan/http";
 import { MODELS } from "@/lib/meta/client";
@@ -23,12 +24,11 @@ export async function POST(request: Request) {
     const fallback = cleanSamPrompt(form.get("fallback"), "");
     const image = await toDataUrl(frame);
 
-    let used = concept;
-    let result = await segmentImage(image, concept);
-    if (result.detections.length === 0 && fallback && fallback !== concept) {
-      used = fallback;
-      result = await segmentImage(image, fallback);
-    }
+    const { word: used, result } = await bestWord(
+      samWords(concept, fallback),
+      (word) => segmentImage(image, word),
+      (r) => r.detections.length,
+    );
 
     const body: CountResult = {
       productIndex: Number.isFinite(productIndex) ? productIndex : -1,

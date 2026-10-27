@@ -19,7 +19,8 @@ a brand is often printed small ("Indomie" above "SUPER PACK", "Nestlé" above "N
 For each product:
 - name: what a buyer would search for, with size if visible. Use the language on the packaging, else English.
   Use local market names: in Cameroon and Nigeria, plantains (large, cooked) are not sweet bananas.
-- brand: the maker's name printed on the pack. Only "" when no name is printed or readable.
+- brand: the maker's name as printed on the pack. Only a name you can actually read in the frames, never one
+  guessed from memory or from the product type; "" when no name is printed or readable.
 - appearance: a few words on how one unit looks, enough to tell it apart from similar products on this stall:
   main colours, big printed words, pictures (for example "yellow carton, blue SUPER PACK badge",
   "orange carton, white Indomie logo", "pink carton with a running man").
@@ -31,7 +32,9 @@ For each product:
   object detector that only sees shapes. Examples: "carton", "bag", "sack", "bottle", "tin", "jerrycan",
   "crate", "sachet", "bunch of plantains", "pineapple", "tomato". Never describe contents, brand or flavour:
   "carton of instant noodles" finds nothing, "carton" works. Products that look alike (the same carton in
-  different flavours) must share the same samPrompt; a later step tells them apart.
+  different flavours, the same tin in two brands) must share the same samPrompt; a later step tells them
+  apart. Products of different shapes keep their own words: an onion, a garlic bulb and a chili are three
+  shapes, not one.
 - samFallback: a synonym for the same shape, tried if the first finds nothing ("box" for carton, "sack" for
   bag, "bunch of bananas" for plantains, "container" for a tub).
 - unit: the selling unit (bag, bottle, carton, tin, bunch, heap, basin, piece...).

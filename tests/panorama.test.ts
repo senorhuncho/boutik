@@ -1,7 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { cameraOffsets, clusterAcrossFrames, filterPanClusters, type KeyframeDetections } from "../lib/scan/panorama.ts";
+import {
+  cameraOffsets,
+  clusterAcrossFrames,
+  coverage,
+  filterPanClusters,
+  panPlausible,
+  type KeyframeDetections,
+} from "../lib/scan/panorama.ts";
 import type { Detection, Track } from "../lib/scan/types.ts";
 
 interface Fixture {
@@ -76,4 +83,21 @@ test("two sightings in the same keyframe stay two units even when they overlap",
   );
   assert.equal(clusters.length, 2);
   assert.ok(clusters.every((c) => new Set(c.members.map((m) => m.frame)).size === c.members.length));
+});
+
+test("a steady two-stall pan passes the plausibility check (real data)", () => {
+  const offsets = cameraOffsets(fx.track.tracks, fx.track.frames, fx.clip);
+  const cover = coverage(offsets, fx.clip);
+  assert.ok(cover > 2 && cover < 2.4, `coverage ${cover}`);
+  // About 6 bags of the trader's are in the fullest frame; 12 across the pan is possible.
+  assert.equal(panPlausible(12, 6, cover), true);
+});
+
+test("a count far beyond what the camera's travel could show is rejected", () => {
+  // Warehouse video: the camera walked around piles (measured travel covers 1.5 frames), 10 cartons in the
+  // fullest frame, but lining frames up as a pan gave 42.
+  assert.equal(panPlausible(42, 10, 1.53), false);
+  assert.equal(panPlausible(18, 10, 1.53), true);
+  assert.equal(coverage([], { width: 10, height: 10 }), 1);
+  assert.equal(coverage([{ dx: 0, dy: 0 }, { dx: -50, dy: 0 }, { dx: 50, dy: 0 }], { width: 100, height: 100 }), 2);
 });

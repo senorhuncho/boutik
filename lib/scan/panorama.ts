@@ -204,3 +204,23 @@ export function filterPanClusters(clusters: readonly PanCluster[], threshold: nu
   }
   return { kept: sized.kept.map((d) => byKey.get(d.id)).filter((c): c is PanCluster => Boolean(c)), dropped };
 }
+
+/** How much more of the stall the whole video shows than one frame: (width + horizontal travel) × (height + vertical travel). */
+export function coverage(offsets: readonly Offset[], clip: { width: number; height: number }): number {
+  if (offsets.length === 0) return 1;
+  const xs = offsets.map((o) => o.dx);
+  const ys = offsets.map((o) => o.dy);
+  const spanX = Math.max(...xs) - Math.min(...xs);
+  const spanY = Math.max(...ys) - Math.min(...ys);
+  return ((clip.width + spanX) / clip.width) * ((clip.height + spanY) / clip.height);
+}
+
+/**
+ * Lining frames up assumes a steady pan. When the camera walks around a pile
+ * or turns, the alignment fails and the same units are counted again in every
+ * frame. A pan covering N times one frame can show at most about N times the
+ * units of the fullest frame, so a larger total means the alignment failed.
+ */
+export function panPlausible(total: number, fullestFrame: number, cover: number, slack = 1.25): boolean {
+  return total <= Math.ceil(Math.max(1, fullestFrame) * cover * slack);
+}

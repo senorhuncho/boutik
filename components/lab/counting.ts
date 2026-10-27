@@ -1,9 +1,16 @@
 import { contactSheet, cropImage, cropUnit, drawNumberedBoxes, type Tile } from "@/lib/media/annotate";
 import type { ExtractedFrame } from "@/lib/media/browser";
 import type { TrackingClip } from "@/lib/media/clip";
-import { countAtThreshold } from "@/lib/scan/accuracy";
+import { countAtThreshold, filterDetections } from "@/lib/scan/accuracy";
 import type { CountGroup, ShapeGroup } from "@/lib/scan/grouping";
-import { cameraOffsets, clusterAcrossFrames, filterPanClusters, type PanCluster } from "@/lib/scan/panorama";
+import {
+  cameraOffsets,
+  clusterAcrossFrames,
+  coverage,
+  filterPanClusters,
+  panPlausible,
+  type PanCluster,
+} from "@/lib/scan/panorama";
 import { filterTracks, isSaturated, splitJumps, summarizeTracks, type UnitTrack } from "@/lib/scan/tracks";
 import type { CountResult, Product, TrackResult } from "@/lib/scan/types";
 
@@ -193,7 +200,13 @@ export async function countShape(shape: ShapeGroup, ctx: CountContext): Promise<
 
   if (isSaturated(tracked)) {
     try {
-      return await countAcrossFrames(shape, ctx, tracked, clip);
+      const across = await countAcrossFrames(shape, ctx, tracked, clip);
+      if (across) return across;
+      return countByFrames(
+        shape,
+        ctx,
+        "More than 16 alike in view, and the camera did not move in a steady pan, so the frames could not be lined up. Counted on the clearest frame.",
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "failed";
       return countByFrames(
@@ -260,9 +273,10 @@ async function countAcrossFrames(
   ctx: CountContext,
   tracked: TrackResult,
   clip: TrackingClip,
-): Promise<Record<number, CountState>> {
+): Promise<Record<number, CountState> | null> {
   const started = Date.now();
   const offsets = cameraOffsets(tracked.tracks, tracked.frames, clip);
+  const cover = coverage(offsets, clip);
   const panPx = Math.round(Math.abs(offsets[offsets.length - 1]?.dx ?? 0));
 
   const perFrame = await Promise.all(
@@ -309,6 +323,14 @@ async function countAcrossFrames(
       };
     });
     const clusters = clusterAcrossFrames(inputs, offsets);
+    // Sanity check against the camera's travel; a failed alignment counts the same units again.
+    const fullest = Math.max(
+      0,
+      ...inputs.map(
+        (input) => filterDetections(input.detections, 0.5, { rejected: new Set(input.rejected) }).kept.length,
+      ),
+    );
+    if (!panPlausible(filterPanClusters(clusters, 0.5).kept.length, fullest, cover)) return null;
     for (const c of clusters) {
       const frame = ctx.frames[c.rep.frame];
       if (frame && !cropJobs.has(c.key)) cropJobs.set(c.key, { blob: frame.blob, box: c.rep.box });

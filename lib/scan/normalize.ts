@@ -75,6 +75,10 @@ export function normalizeIdentify(
     if (!name || seenNames.has(name.toLowerCase())) continue;
     seenNames.add(name.toLowerCase());
     const unit = text(item.unit, 30) || "item";
+    const bestFrame = int(item.bestFrame, 0, lastFrame, 0);
+    const seenIn = Array.isArray(item.seenIn)
+      ? item.seenIn.filter((f): f is number => Number.isInteger(f) && f >= 0 && f <= lastFrame)
+      : [];
     products.push({
       name,
       brand: text(item.brand, 60),
@@ -84,7 +88,8 @@ export function normalizeIdentify(
       unit,
       estimatedCount: int(item.estimatedCount, 0, 5000, 0),
       countConfidence: oneOf(item.countConfidence, CONFIDENCE, "low"),
-      bestFrame: int(item.bestFrame, 0, lastFrame, 0),
+      bestFrame,
+      seenIn: [...new Set([...seenIn, bestFrame])].sort((a, b) => a - b),
       countingNotes: text(item.countingNotes, 240),
       keywords: strings(item.keywords, 8, 40),
     });

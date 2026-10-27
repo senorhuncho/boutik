@@ -24,6 +24,8 @@ export interface Product {
   countConfidence: Confidence;
   /** Index of the frame where the whole group is most visible. */
   bestFrame: number;
+  /** Every frame where at least one unit is visible (always includes bestFrame). */
+  seenIn: number[];
   countingNotes: string;
   /** Words a trader might say for this product, in any language. */
   keywords: string[];

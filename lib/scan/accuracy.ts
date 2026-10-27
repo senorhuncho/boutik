@@ -174,9 +174,20 @@ function score(pairs: { real: number; guess: number }[]): MethodScore | null {
   };
 }
 
-export function scoreMethods(rows: readonly AccuracyRow[]): { spark: MethodScore | null; sam: MethodScore | null } {
+/** The larger of SAM's count and Muse Spark's estimate: both mostly miss units, rarely invent them. */
+export function bestOfBoth(sam: number | null, spark: number): number {
+  return sam === null ? spark : Math.max(sam, spark);
+}
+
+export function scoreMethods(rows: readonly AccuracyRow[]): {
+  spark: MethodScore | null;
+  sam: MethodScore | null;
+  both: MethodScore | null;
+} {
   return {
     spark: score(rows.map((r) => ({ real: r.real, guess: r.spark }))),
     sam: score(rows.filter((r) => r.sam !== null).map((r) => ({ real: r.real, guess: r.sam as number }))),
+    // On Jason's shop video (7 hand counts): SAM best frame 7.1, Spark 4.1, highest frame 5.0, this 4.0 average error.
+    both: score(rows.map((r) => ({ real: r.real, guess: bestOfBoth(r.sam, r.spark) }))),
   };
 }

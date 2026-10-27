@@ -48,6 +48,11 @@ function formatMoney(amount: number, currency: string): string {
   return currency === "XAF" ? `${n} FCFA` : currency === "NGN" ? `₦${n}` : n;
 }
 
+/** The frame a count was made on: the frame method may pick another frame than Muse Spark's best one. */
+function shownFrame(count: CountState | undefined, bestFrame: number): number {
+  return count?.state === "done" && count.method === "frame" ? count.result.frame : bestFrame;
+}
+
 function percent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
@@ -365,6 +370,7 @@ export function LabClient() {
             {
               method: "frame",
               why: v.why,
+              views: v.views,
               ...v.result,
               sharing: v.sharing,
               count: samCount(v, threshold),
@@ -508,7 +514,7 @@ export function LabClient() {
               key={`${p.name}-${i}`}
               index={i}
               product={p}
-              frame={frames[p.bestFrame] ?? frames[0]}
+              frame={frames[shownFrame(counts[i], p.bestFrame)] ?? frames[0]}
               count={counts[i]}
               threshold={threshold}
               prices={prices?.prices.filter((x) => x.productIndex === i) ?? []}
@@ -521,7 +527,7 @@ export function LabClient() {
 
       {prices ? <PricesPanel prices={prices} products={products} /> : null}
 
-      {rows.length > 0 ? <AccuracyPanel spark={scores.spark} sam={scores.sam} /> : null}
+      {rows.length > 0 ? <AccuracyPanel spark={scores.spark} sam={scores.sam} both={scores.both} /> : null}
 
       {identify && !busy ? (
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -662,7 +668,7 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
                 ? ` through the whole video`
                 : done?.method === "pan"
                   ? ` on every frame`
-                  : ` in frame #${product.bestFrame}`}
+                  : ` in frame #${shownFrame(count, product.bestFrame)}`}
               {usedFallback ? ` (“${product.samPrompt}” found too few)` : ""}
             </p>
           </div>
@@ -723,6 +729,12 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
           </p>
         ) : null}
         {done?.method === "frame" && done.why ? <p className="mt-3 text-sm text-[var(--color-warn)]">{done.why}</p> : null}
+        {done?.method === "frame" && done.views && done.views.length > 1 ? (
+          <p className="mt-3 text-sm text-[var(--color-muted)]">
+            Counted on the {done.views.length} frames it was seen in (
+            {done.views.map((v) => `#${v.frame}: ${v.count}`).join(", ")}); the most seen at once is shown.
+          </p>
+        ) : null}
         {done?.sharing && done.sharing.products === 1 && done.sharing.sortError ? (
           <p className="mt-3 text-sm text-[var(--color-warn)]">Muse Spark could not check the units: {done.sharing.sortError}</p>
         ) : null}
@@ -875,7 +887,7 @@ function PricesPanel({ prices, products }: { prices: PricesResult; products: Pro
   );
 }
 
-function AccuracyPanel({ spark, sam }: { spark: MethodScore | null; sam: MethodScore | null }) {
+function AccuracyPanel({ spark, sam, both }: { spark: MethodScore | null; sam: MethodScore | null; both: MethodScore | null }) {
   const cell = (s: MethodScore | null, pick: (m: MethodScore) => string) => (s ? pick(s) : "–");
   return (
     <section className="mt-6 rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] p-4 sm:p-5">
@@ -902,6 +914,12 @@ function AccuracyPanel({ spark, sam }: { spark: MethodScore | null; sam: MethodS
             <td>{cell(sam, (m) => percent(m.exact))}</td>
             <td>{cell(sam, (m) => percent(m.close))}</td>
             <td>{cell(sam, (m) => `${m.mae.toFixed(1)} · ${percent(m.mape)}`)}</td>
+          </tr>
+          <tr className="border-t border-[var(--color-line)]">
+            <td className="py-2 font-medium">Higher of both</td>
+            <td>{cell(both, (m) => percent(m.exact))}</td>
+            <td>{cell(both, (m) => percent(m.close))}</td>
+            <td>{cell(both, (m) => `${m.mae.toFixed(1)} · ${percent(m.mape)}`)}</td>
           </tr>
         </tbody>
       </table>

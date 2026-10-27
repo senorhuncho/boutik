@@ -10,7 +10,7 @@ import {
   transcriptionKeywords,
 } from "../lib/scan/normalize.ts";
 import { groupForCounting, shapeGroups } from "../lib/scan/grouping.ts";
-import { countAtThreshold, filterDetections, scoreMethods, topFaces } from "../lib/scan/accuracy.ts";
+import { bestOfBoth, countAtThreshold, filterDetections, scoreMethods, topFaces } from "../lib/scan/accuracy.ts";
 import type { Detection } from "../lib/scan/types.ts";
 
 test("cleanSamPrompt keeps one short noun phrase", () => {
@@ -126,6 +126,23 @@ test("scoreMethods computes exact, close and error rates", () => {
   assert.equal(sam?.exact, 0.5);
   assert.equal(sam?.close, 1);
   assert.equal(scoreMethods([]).spark, null);
+});
+
+test("the higher of SAM and Muse Spark is scored as a third method (Jason's shop hand counts)", () => {
+  // Real, Spark's estimate, SAM's highest frame: Indomie, Guigoz, Phosphatine, NAN, Nido, Broli, oil.
+  const rows = [
+    { real: 47, spark: 35, sam: 32 },
+    { real: 3, spark: 1, sam: 2 },
+    { real: 13, spark: 4, sam: 2 },
+    { real: 4, spark: 5, sam: 4 },
+    { real: 8, spark: 10, sam: 8 },
+    { real: 15, spark: 12, sam: 8 },
+    { real: 7, spark: 7, sam: 6 },
+  ];
+  const { spark, sam, both } = scoreMethods(rows);
+  assert.equal(sam?.mae, 5);
+  assert.ok(both && spark && both.mae <= spark.mae && both.mae < (sam?.mae ?? 0));
+  assert.equal(bestOfBoth(null, 6), 6);
 });
 
 function boxed(id: string, confidence: number, left: number, top: number, right: number, bottom: number): Detection {
@@ -308,4 +325,33 @@ test("topFaces leaves a small box standing on a big one, and strips cut off by t
   // One face has one top: the closer strip wins.
   const tops = topFaces([box("face", 0, 200, 300, 500), box("near", 10, 160, 290, 205), box("far", 10, 130, 290, 170)]);
   assert.deepEqual([...tops], ["near"]);
+});
+
+test("a product is counted on every frame it is seen in, sharing one search per frame", () => {
+  // Jason's shop: Nido seen in frames 4, 5, 6 and 10; NAN in 4 and 6 (best 6); a bag product elsewhere.
+  const groups = groupForCounting([
+    { samPrompt: "tin", samFallback: "can", bestFrame: 6, seenIn: [4, 5, 6, 10] },
+    { samPrompt: "tin", samFallback: "can", bestFrame: 6, seenIn: [4] },
+    { samPrompt: "bag", samFallback: "sack", bestFrame: 2 },
+  ]);
+  assert.deepEqual(
+    groups.map((g) => [g.concept, g.frame, g.members]),
+    [
+      ["tin", 4, [0, 1]],
+      ["tin", 5, [0]],
+      ["tin", 6, [0, 1]],
+      ["tin", 10, [0]],
+      ["bag", 2, [2]],
+    ],
+  );
+  assert.ok(groups.filter((g) => g.concept === "tin").every((g) => g.candidates.join() === "0,1"));
+});
+
+test("normalizeIdentify keeps valid seenIn frames and always includes the best frame", () => {
+  const { products } = normalizeIdentify(
+    { products: [{ name: "Nido", samPrompt: "tin", unit: "tin", bestFrame: 6, seenIn: [10, 4, 4, 99, -1, 2.5, "3"] }] },
+    12,
+  );
+  assert.deepEqual(products[0]?.seenIn, [4, 6, 10]);
+  assert.deepEqual(normalizeIdentify({ products: [{ name: "Rice", samPrompt: "bag", bestFrame: 1 }] }, 4).products[0]?.seenIn, [1]);
 });

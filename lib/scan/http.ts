@@ -3,7 +3,7 @@ import { describeError } from "@/lib/meta/client";
 import { requestHasLabAccess } from "@/lib/lab/access";
 
 export const LIMITS = {
-  maxFrames: 12,
+  maxFrames: 16,
   maxFrameBytes: 1_500_000,
   maxAudioBytes: 3_800_000,
   maxProducts: 24,

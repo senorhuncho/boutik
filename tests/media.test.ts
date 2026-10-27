@@ -50,11 +50,11 @@ test("candidateTimes stays inside the video and covers each segment", () => {
   assert.deepEqual([...all].sort((a, b) => a - b), all, "times are in order");
 });
 
-test("frameCountFor clamps between 4 and 12", () => {
+test("frameCountFor clamps between 4 and 16", () => {
   assert.equal(frameCountFor(2), 4);
   assert.equal(frameCountFor(12), 6);
   assert.equal(frameCountFor(16), 8);
-  assert.equal(frameCountFor(88), 12);
+  assert.equal(frameCountFor(88), 16);
 });
 
 test("the tracking clip keeps a whole frame rate and covers long videos to the end", () => {

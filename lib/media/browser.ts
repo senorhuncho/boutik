@@ -21,8 +21,9 @@ export interface ExtractedAudio {
 
 const FRAME_MAX_SIDE = 1280;
 const PROBE_SIDE = 192;
-/** Up to 12 frames go up in one request, and Vercel takes at most 4.5 MB per request. */
-const FRAME_BUDGET_BYTES = 320_000;
+/** All frames go up in one request, and Vercel takes at most 4.5 MB per request. */
+const FRAMES_BUDGET_BYTES = 3_600_000;
+const JPEG_QUALITIES = [0.85, 0.75, 0.65, 0.55];
 const AUDIO_RATE = 16000;
 /** Same as the longest video the lab accepts, so prices spoken at the end are heard. */
 const MAX_AUDIO_SECONDS = 90;
@@ -101,6 +102,7 @@ export async function extractKeyframes(
   if (!ctx || !probeCtx) throw new Error("This browser cannot process images.");
 
   const frames: ExtractedFrame[] = [];
+  const budget = Math.floor(FRAMES_BUDGET_BYTES / Math.max(1, segments));
   const total = plan.flat().length;
   let done = 0;
 
@@ -117,8 +119,11 @@ export async function extractKeyframes(
     if (!best) continue;
     await seek(video, best.time);
     ctx.drawImage(video, 0, 0, width, height);
-    let blob = await canvasToBlob(canvas, 0.85);
-    if (blob.size > FRAME_BUDGET_BYTES) blob = await canvasToBlob(canvas, 0.7);
+    let blob = await canvasToBlob(canvas, JPEG_QUALITIES[0] as number);
+    for (const quality of JPEG_QUALITIES.slice(1)) {
+      if (blob.size <= budget) break;
+      blob = await canvasToBlob(canvas, quality);
+    }
     frames.push({
       index: frames.length,
       time: best.time,

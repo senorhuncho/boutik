@@ -66,6 +66,8 @@ export type CountState =
       faces: string[];
       sharing: Sharing | null;
       why?: string;
+      /** The count on every frame this product was seen in; the highest one is shown. */
+      views?: { frame: number; count: number }[];
     }
   | { state: "done"; method: "track"; track: TrackedCount; sharing: Sharing | null }
   | { state: "error"; error: string };
@@ -88,6 +90,8 @@ interface AssignResponse {
 }
 
 const MAX_SORT_LABELS = 80;
+/** The lab's starting confidence threshold, used to pick each product's best frame. */
+const DEFAULT_THRESHOLD = 0.5;
 
 export async function postForm<T>(url: string, form: FormData): Promise<T> {
   const res = await fetch(url, { method: "POST", body: form });
@@ -206,9 +210,53 @@ async function countFrameGroup(group: CountGroup, ctx: CountContext, why?: strin
   return updates;
 }
 
+/** Frame searches per shape at once; several shapes are counted at the same time. */
+const FRAME_CONCURRENCY = 4;
+
+/**
+ * Counts a shape on every frame its products are seen in, and keeps each
+ * product's highest count. Units are never added across frames (the same unit
+ * shows up in several), so this is the most units seen together at one time:
+ * a safe lower bound when frames cannot be lined up.
+ */
 async function countByFrames(shape: ShapeGroup, ctx: CountContext, why: string): Promise<Record<number, CountState>> {
-  const parts = await Promise.all(shape.byFrame.map((g) => countFrameGroup(g, ctx, why)));
-  return Object.assign({}, ...parts) as Record<number, CountState>;
+  const groups = shape.byFrame;
+  const parts: Record<number, CountState>[] = new Array(groups.length);
+  let next = 0;
+  const worker = async () => {
+    for (let k = next++; k < groups.length; k = next++) {
+      const group = groups[k] as CountGroup;
+      try {
+        parts[k] = await countFrameGroup(group, ctx, why);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "failed";
+        parts[k] = Object.fromEntries(group.members.map((m) => [m, { state: "error", error: message } as CountState]));
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(FRAME_CONCURRENCY, groups.length) }, worker));
+
+  const best: Record<number, CountState> = {};
+  const views: Record<number, { frame: number; count: number }[]> = {};
+  parts.forEach((part, k) => {
+    const frame = (groups[k] as CountGroup).frame;
+    for (const [key, state] of Object.entries(part)) {
+      const m = Number(key);
+      const n = samCount(state, DEFAULT_THRESHOLD);
+      if (n !== null) (views[m] ??= []).push({ frame, count: n });
+      const current = best[m];
+      const have = samCount(current, DEFAULT_THRESHOLD);
+      const preferred = ctx.products[m]?.bestFrame === frame;
+      if (!current || (n !== null && (have === null || n > have || (n === have && preferred)))) best[m] = state;
+    }
+  });
+  for (const [key, state] of Object.entries(best)) {
+    const list = views[Number(key)];
+    if (state.state === "done" && state.method === "frame" && list) {
+      best[Number(key)] = { ...state, views: list.sort((a, b) => a.frame - b.frame) };
+    }
+  }
+  return best;
 }
 
 /**

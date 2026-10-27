@@ -32,6 +32,8 @@ For each product:
   several frames because the camera moved.
 - countConfidence: low if units are stacked, hidden or overlapping; high only if each unit is clearly separate.
 - bestFrame: the 0-based index of the frame where this product's whole group is most visible and sharp.
+- seenIn: the 0-based index of every frame where at least one unit of this product is visible. A shop
+  filmed shelf by shelf often shows the same product in two places: list both.
 - countingNotes: one short sentence on anything that makes counting hard.
 - keywords: up to 6 words a trader might say aloud for this product, in English, French or Pidgin
   (for example "riz", "rice", "Uncle Ben's").

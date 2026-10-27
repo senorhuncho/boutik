@@ -58,9 +58,11 @@ export function candidateTimes(duration: number, segments: number, perSegment: n
 
 /**
  * How many frames to sample for a video of this length: about one per 2 s, 4 to
- * 12. A shop filmed shelf by shelf needs the higher end, or whole shelves fall
- * between two frames.
+ * 16. A shop filmed shelf by shelf needs the higher end: with 12 frames over
+ * 88 s the sugar shelf, on screen for 3 s, fell between two frames. (Picking
+ * frames by how different they look was tried; cheap colour histograms were
+ * too noisy to tell one shelf from the next.)
  */
 export function frameCountFor(duration: number): number {
-  return Math.min(12, Math.max(4, Math.round(duration / 2)));
+  return Math.min(16, Math.max(4, Math.round(duration / 2)));
 }

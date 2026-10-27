@@ -88,9 +88,27 @@ export async function cropUnit(
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("This browser cannot draw images.");
   ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  outlineUnit(ctx, box.left * scale, box.top * scale, w, h, sx, sy, k);
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Could not save a crop."))), "image/jpeg", 0.88);
   });
+}
+
+/** Marks which unit a close-up is about, since its margin shows parts of the neighbours. */
+function outlineUnit(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  sx: number,
+  sy: number,
+  k: number,
+): void {
+  const line = Math.max(2, Math.round(Math.min(ctx.canvas.width, ctx.canvas.height) / 90));
+  ctx.strokeStyle = "#ff00aa";
+  ctx.lineWidth = line;
+  ctx.strokeRect((x - sx) * k + line / 2, (y - sy) * k + line / 2, w * k - line, h * k - line);
 }
 
 /** One image with every unit's close-up in a numbered grid, for Muse Spark to sort. */
@@ -154,6 +172,7 @@ export async function cropImage(image: Blob, box: { left: number; top: number; r
   if (!ctx) throw new Error("This browser cannot draw images.");
   ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
   bitmap.close();
+  outlineUnit(ctx, box.left, box.top, w, h, sx, sy, k);
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Could not save a crop."))), "image/jpeg", 0.88);
   });

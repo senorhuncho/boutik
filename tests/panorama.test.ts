@@ -6,6 +6,8 @@ import {
   clusterAcrossFrames,
   coverage,
   filterPanClusters,
+  isSteadyPan,
+  panFit,
   panPlausible,
   type KeyframeDetections,
 } from "../lib/scan/panorama.ts";
@@ -100,4 +102,22 @@ test("a count far beyond what the camera's travel could show is rejected", () =>
   assert.equal(panPlausible(18, 10, 1.53), true);
   assert.equal(coverage([], { width: 10, height: 10 }), 1);
   assert.equal(coverage([{ dx: 0, dy: 0 }, { dx: -50, dy: 0 }, { dx: 50, dy: 0 }], { width: 100, height: 100 }), 2);
+});
+
+test("a steady pan is recognised and a walk around a warehouse is not (real data)", () => {
+  const pan = panFit(fx.track.tracks, fx.track.frames, fx.clip);
+  assert.ok(pan.spread < 0.12, `pan spread ${pan.spread}`);
+  assert.equal(isSteadyPan(pan), true);
+
+  const walk = JSON.parse(
+    readFileSync(new URL("./fixtures/sam-track-warehouse-walk.json", import.meta.url), "utf8"),
+  ) as { frames: number; tracks: Track[] };
+  const fit = panFit(walk.tracks, walk.frames, { width: 676, height: 960 });
+  assert.equal(isSteadyPan(fit), false, `walk spread ${fit.spread}, measured ${fit.measured}`);
+});
+
+test("a still camera counts as steady; too few comparable objects does not", () => {
+  assert.equal(isSteadyPan({ move: 0.5, spread: 0.9, measured: 0.9 }), true);
+  assert.equal(isSteadyPan({ move: 10, spread: 0.05, measured: 0.3 }), false);
+  assert.equal(isSteadyPan({ move: 10, spread: 0.3, measured: 0.9 }), false);
 });

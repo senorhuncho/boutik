@@ -8,6 +8,8 @@ import {
   clusterAcrossFrames,
   coverage,
   filterPanClusters,
+  isSteadyPan,
+  panFit,
   panPlausible,
   type PanCluster,
 } from "@/lib/scan/panorama";
@@ -275,6 +277,8 @@ async function countAcrossFrames(
   clip: TrackingClip,
 ): Promise<Record<number, CountState> | null> {
   const started = Date.now();
+  // Lining frames up only works for a still camera or a steady pan.
+  if (!isSteadyPan(panFit(tracked.tracks, tracked.frames, clip))) return null;
   const offsets = cameraOffsets(tracked.tracks, tracked.frames, clip);
   const cover = coverage(offsets, clip);
   const panPx = Math.round(Math.abs(offsets[offsets.length - 1]?.dx ?? 0));

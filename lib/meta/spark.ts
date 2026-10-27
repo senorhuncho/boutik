@@ -187,7 +187,8 @@ export async function extractPrices(
 
 const ASSIGN_INSTRUCTIONS = `An object detector found units on a market stall. Each unit carries a number: either a numbered box
 drawn on a photo of the stall, or a numbered tile in a grid of close-ups (one unit per tile, cropped from the video
-at the moment it was clearest). Several products look alike (for example the same carton in different flavours),
+at the moment it was clearest). In a close-up the unit is the one inside the pink outline; parts of neighbouring
+units at the edges of the tile are normal, so judge only the outlined unit. Several products look alike (for example the same carton in different flavours),
 so the detector cannot tell them apart. Look at what is printed or visible on each numbered unit and say which
 product it is.
 
@@ -199,13 +200,15 @@ rice bags, a water bottle next to oil), or goods on another stall in the backgro
 exactly once.`;
 
 const VERIFY_INSTRUCTIONS = `An object detector found units on a market stall that have the shape of one product. Each unit carries
-a number: either a numbered box drawn on a photo of the stall, or a numbered tile in a grid of close-ups.
+a number: either a numbered box drawn on a photo of the stall, or a numbered tile in a grid of close-ups. In a
+close-up the unit is the one inside the pink outline; parts of neighbouring units at the edges of the tile are
+normal, so judge only the outlined unit. A unit partly cut off by the edge of the picture still counts.
 Check every number and give productIndex:
 - the product's index when the unit is the same kind of item for sale on this trader's stall. Ignore differences in
   brand, label, size or colour: a bottle of cooking oil with another label is still cooking oil.
 - -1 only when it is clearly something else: a different kind of item with the same shape (a feed sack next to rice,
-  a water bottle next to oil), goods on another stall in the background, a person, a shelf, an empty space, or a
-  box that covers several units at once.
+  a water bottle next to oil), goods on another stall in the background, a person, a shelf, an empty space, or an
+  outline drawn around a whole pile rather than one unit.
 Every number must appear exactly once.`;
 
 /**

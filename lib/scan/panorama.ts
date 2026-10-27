@@ -224,3 +224,52 @@ export function coverage(offsets: readonly Offset[], clip: { width: number; heig
 export function panPlausible(total: number, fullestFrame: number, cover: number, slack = 1.25): boolean {
   return total <= Math.ceil(Math.max(1, fullestFrame) * cover * slack);
 }
+
+export interface PanFit {
+  /** Typical camera movement between clip frames, in pixels. */
+  move: number;
+  /** Typical disagreement between tracked objects' movements, as a share of the movement. */
+  spread: number;
+  /** Share of clip steps where at least three tracked objects could be compared. */
+  measured: number;
+}
+
+/**
+ * During a steady pan every object moves the same way between frames. When the
+ * camera walks around a pile or turns, near and far objects move differently
+ * (parallax), so their movements disagree.
+ */
+export function panFit(tracks: readonly Track[], frames: number, clip: { width: number; height: number }): PanFit {
+  const steps: [number, number][][] = Array.from({ length: Math.max(0, frames - 1) }, () => []);
+  for (const track of tracks) {
+    const boxes = [...track.boxes].sort((a, b) => a.f - b.f);
+    for (let i = 1; i < boxes.length; i++) {
+      const a = boxes[i - 1] as Track["boxes"][number];
+      const b = boxes[i] as Track["boxes"][number];
+      if (b.f - a.f !== 1) continue;
+      const mx = ((b.b[0] + b.b[2]) - (a.b[0] + a.b[2])) / 2;
+      const my = ((b.b[1] + b.b[3]) - (a.b[1] + a.b[3])) / 2;
+      if (Math.abs(mx) > MAX_STEP * clip.width || Math.abs(my) > MAX_STEP * clip.height) continue;
+      steps[a.f]?.push([mx, my]);
+    }
+  }
+  const spreads: number[] = [];
+  const moves: number[] = [];
+  for (const step of steps) {
+    if (step.length < 3) continue;
+    const mx = median(step.map((d) => d[0]));
+    const my = median(step.map((d) => d[1]));
+    spreads.push(median(step.map(([x, y]) => Math.hypot(x - mx, y - my))));
+    moves.push(Math.hypot(mx, my));
+  }
+  if (moves.length === 0) return { move: 0, spread: 1, measured: 0 };
+  const move = median(moves);
+  return { move, spread: median(spreads) / Math.max(1, move), measured: moves.length / Math.max(1, steps.length) };
+}
+
+/** A still camera, or a pan where tracked objects move together, can be lined up. */
+export function isSteadyPan(fit: PanFit): boolean {
+  if (fit.measured < 0.6) return false;
+  if (fit.move < 2) return true;
+  return fit.spread <= 0.15;
+}

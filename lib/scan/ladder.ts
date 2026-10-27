@@ -25,6 +25,17 @@ export function alwaysTryGeneric(word: string): boolean {
   return SOFT_PACK_WORDS.has(word.trim().toLowerCase());
 }
 
+/** Every word at once; the one that found most wins, ties to the first. */
+export async function bestWordParallel<T>(
+  words: readonly string[],
+  run: (word: string) => Promise<T>,
+  found: (result: T) => number,
+): Promise<{ word: string; result: T }> {
+  if (words.length === 0) throw new Error("No shape word to look for.");
+  const results = await Promise.all(words.map(async (word) => ({ word, result: await run(word) })));
+  return results.reduce((best, r) => (found(r.result) > found(best.result) ? r : best));
+}
+
 export async function bestWord<T>(
   words: readonly string[],
   run: (word: string) => Promise<T>,

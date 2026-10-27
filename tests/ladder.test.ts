@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bestWord, samWords } from "../lib/scan/ladder.ts";
+import { bestWord, bestWordParallel, samWords } from "../lib/scan/ladder.ts";
 
 test("shape words are tried in order without repeats, ending with the generic one", () => {
   assert.deepEqual(samWords("sachet", "packet"), ["sachet", "packet", "package"]);
@@ -44,4 +44,13 @@ test("for soft packs the generic word is always tried too and the larger find ke
   const tins: string[] = [];
   await bestWord(samWords("tin", "can"), async (w) => (tins.push(w), 9), (n) => n);
   assert.deepEqual(tins, ["tin"]);
+});
+
+test("bestWordParallel runs every word and keeps the one that found most, ties to the first", async () => {
+  const tried: string[] = [];
+  const counts: Record<string, number> = { bag: 3, package: 7, sack: 3 };
+  const pick = await bestWordParallel(["bag", "package"], async (w) => (tried.push(w), counts[w] ?? 0), (n) => n);
+  assert.deepEqual(pick, { word: "package", result: 7 });
+  assert.deepEqual(tried.sort(), ["bag", "package"]);
+  assert.equal((await bestWordParallel(["bag", "sack"], async (w) => counts[w] ?? 0, (n) => n)).word, "bag");
 });

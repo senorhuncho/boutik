@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { MODELS } from "@/lib/meta/client";
 import { segmentVideo } from "@/lib/meta/sam";
-import { bestWord, samWords } from "@/lib/scan/ladder";
+import { GENERIC_SHAPE, alwaysTryGeneric, bestWordParallel } from "@/lib/scan/ladder";
 import { cleanSamPrompt } from "@/lib/scan/normalize";
 import { BadRequest, assertLabAccess, jsonError, readForm } from "@/lib/scan/http";
 import type { TrackResult } from "@/lib/scan/types";
@@ -31,8 +31,11 @@ export async function POST(request: Request) {
     const fallback = cleanSamPrompt(form.get("fallback"), "");
 
     const dataUrl = `data:${clip.type};base64,${Buffer.from(await clip.arrayBuffer()).toString("base64")}`;
-    const { word: used, result } = await bestWord(
-      samWords(concept, fallback),
+    // A video search takes 10–30 s, so two words at most, side by side, or the function times out (502s
+    // appeared when soft packs tried three words one after another).
+    const words = alwaysTryGeneric(concept) ? [concept, GENERIC_SHAPE] : [concept, fallback || concept];
+    const { word: used, result } = await bestWordParallel(
+      [...new Set(words)],
       (word) => segmentVideo(dataUrl, word),
       (r) => r.tracks.length,
     );

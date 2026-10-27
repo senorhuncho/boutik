@@ -355,3 +355,32 @@ test("normalizeIdentify keeps valid seenIn frames and always includes the best f
   assert.deepEqual(products[0]?.seenIn, [4, 6, 10]);
   assert.deepEqual(normalizeIdentify({ products: [{ name: "Rice", samPrompt: "bag", bestFrame: 1 }] }, 4).products[0]?.seenIn, [1]);
 });
+
+test("spots: every frame belongs to one place, unclaimed sightings form one more, marks are kept", () => {
+  const { products } = normalizeIdentify(
+    {
+      products: [
+        {
+          name: "Nido",
+          samPrompt: "tin",
+          unit: "tin",
+          bestFrame: 6,
+          seenIn: [6, 7, 8, 9, 14],
+          marks: ["NIDO 1+", "heart", 42, "x".repeat(70)],
+          spots: [
+            { frames: [6, 7, 8, 9], estimatedCount: 8 },
+            { frames: [9, 14], estimatedCount: 2 },
+          ],
+        },
+        { name: "Rice", samPrompt: "bag", unit: "bag", bestFrame: 1 },
+      ],
+    },
+    16,
+  );
+  assert.deepEqual(products[0]?.marks, ["NIDO 1+", "heart", "x".repeat(60)], "only strings, cut to 60 characters");
+  assert.deepEqual(products[0]?.spots, [
+    { frames: [6, 7, 8, 9], estimatedCount: 8 },
+    { frames: [14], estimatedCount: 2 },
+  ]);
+  assert.deepEqual(products[1]?.spots, [{ frames: [1], estimatedCount: 0 }]);
+});

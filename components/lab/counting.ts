@@ -69,6 +69,10 @@ export type CountState =
       why?: string;
       /** The count on every frame this product was seen in; the highest believable one is shown. */
       views?: { frame: number; count: number; tooMany: boolean }[];
+      /** Each place the product sits: the frames showing it and the units counted there. */
+      spots?: { frames: number[]; frame: number; count: number }[];
+      /** Units counted at the other places, added to the shown frame's count. */
+      elsewhere?: number;
     }
   | { state: "done"; method: "track"; track: TrackedCount; sharing: Sharing | null }
   | { state: "error"; error: string };
@@ -105,7 +109,10 @@ export async function postForm<T>(url: string, form: FormData): Promise<T> {
 export function samCount(state: CountState | undefined, threshold: number): number | null {
   if (state?.state !== "done") return null;
   if (state.method === "frame") {
-    return countAtThreshold(state.result.detections, threshold, new Set(state.rejected), new Set(state.faces));
+    return (
+      countAtThreshold(state.result.detections, threshold, new Set(state.rejected), new Set(state.faces)) +
+      (state.elsewhere ?? 0)
+    );
   }
   if (state.method === "pan") return filterPanClusters(state.pan.clusters, threshold).kept.length;
   return filterTracks(
@@ -139,6 +146,7 @@ async function sortUnits(
     name: products[i]?.name,
     brand: products[i]?.brand,
     appearance: products[i]?.appearance,
+    marks: products[i]?.marks ?? [],
   });
   form.append("products", JSON.stringify(candidates.map(describe)));
   // The rest of the scan, so Muse Spark knows what a unit may be instead: checking "custard tub" alone, it
@@ -287,19 +295,59 @@ async function countByFrames(shape: ShapeGroup, ctx: CountContext, why: string):
     }
   });
 
+  // Spot by spot, the way a shopkeeper counts: each place the product sits is counted on the frames that show
+  // it (the most seen at once there), and the places are added up. The same place filmed twice is one spot.
   const best: Record<number, CountState> = {};
   for (const [key, list] of Object.entries(seen)) {
     const m = Number(key);
     const product = ctx.products[m];
+    const estimate = product?.estimatedCount ?? 0;
+    const bestFrame = product?.bestFrame ?? 0;
     list.sort((a, b) => a.frame - b.frame);
-    const pick = pickView(list, product?.estimatedCount ?? 0, product?.bestFrame ?? 0);
-    const chosen = list[pick] ?? list[0];
-    if (!chosen) continue;
-    const cap = plausibleCap(product?.estimatedCount ?? 0);
+    const cap = plausibleCap(estimate);
     const views = list
       .filter((v) => v.count !== null)
       .map((v) => ({ frame: v.frame, count: v.count as number, tooMany: (v.count as number) > cap }));
-    best[m] = chosen.state.state === "done" && chosen.state.method === "frame" ? { ...chosen.state, views } : chosen.state;
+
+    const claimed = new Set<number>();
+    const groups: { frames: number[]; estimate: number }[] = [];
+    for (const spot of product?.spots ?? []) {
+      const frames = spot.frames.filter((f) => list.some((v) => v.frame === f) && !claimed.has(f));
+      if (frames.length === 0) continue;
+      frames.forEach((f) => claimed.add(f));
+      groups.push({ frames, estimate: spot.estimatedCount || estimate });
+    }
+    const rest = list.map((v) => v.frame).filter((f) => !claimed.has(f));
+    if (rest.length > 0) groups.push({ frames: rest, estimate });
+
+    const spots: { frames: number[]; frame: number; count: number; state: CountState }[] = [];
+    for (const group of groups) {
+      const mine = list.filter((v) => group.frames.includes(v.frame));
+      const pick = pickView(mine, group.estimate, bestFrame);
+      const chosen = mine[pick] ?? mine[0];
+      if (!chosen) continue;
+      spots.push({ frames: group.frames, frame: chosen.frame, count: chosen.count ?? 0, state: chosen.state });
+    }
+    if (spots.length === 0) continue;
+    let total = spots.reduce((sum, s) => sum + s.count, 0);
+    let kept = spots;
+    if (total > cap) {
+      // More places than Muse Spark's whole-video estimate allows: the same place was probably listed twice.
+      const largest = spots.reduce((a, b) => (b.count > a.count ? b : a));
+      kept = [largest];
+      total = largest.count;
+    }
+    const shown = kept.reduce((a, b) => (b.count > a.count || (b.count === a.count && b.frames.includes(bestFrame)) ? b : a));
+    const state = shown.state;
+    best[m] =
+      state.state === "done" && state.method === "frame"
+        ? {
+            ...state,
+            views,
+            spots: kept.map(({ frames, frame, count }) => ({ frames, frame, count })),
+            elsewhere: total - shown.count,
+          }
+        : state;
   }
   return best;
 }

@@ -36,6 +36,8 @@ export const identifySchema = {
           "countConfidence",
           "bestFrame",
           "seenIn",
+          "marks",
+          "spots",
           "countingNotes",
           "keywords",
         ],
@@ -50,6 +52,19 @@ export const identifySchema = {
           countConfidence: confidence,
           bestFrame: { type: "integer" },
           seenIn: { type: "array", items: { type: "integer" } },
+          marks: { type: "array", items: { type: "string" } },
+          spots: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["frames", "estimatedCount"],
+              properties: {
+                frames: { type: "array", items: { type: "integer" } },
+                estimatedCount: { type: "integer" },
+              },
+            },
+          },
           countingNotes: { type: "string" },
           keywords: { type: "array", items: { type: "string" } },
         },

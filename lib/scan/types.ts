@@ -26,9 +26,20 @@ export interface Product {
   bestFrame: number;
   /** Every frame where at least one unit is visible (always includes bestFrame). */
   seenIn: number[];
+  /** Printed words, logos and pictures that tell this product from look-alikes. */
+  marks: string[];
+  /** The distinct places in the shop where this product sits, with the frames showing each. */
+  spots: Spot[];
   countingNotes: string;
   /** Words a trader might say for this product, in any language. */
   keywords: string[];
+}
+
+export interface Spot {
+  /** Frames showing this place; a frame belongs to one spot only. */
+  frames: number[];
+  /** Muse Spark's estimate of the units at this place, including ones hidden behind others. */
+  estimatedCount: number;
 }
 
 export interface IdentifyResult {

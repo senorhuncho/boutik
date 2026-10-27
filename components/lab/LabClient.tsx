@@ -371,6 +371,8 @@ export function LabClient() {
               method: "frame",
               why: v.why,
               views: v.views,
+              spots: v.spots,
+              elsewhere: v.elsewhere,
               ...v.result,
               sharing: v.sharing,
               count: samCount(v, threshold),
@@ -734,6 +736,13 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
             Counted on the {done.views.length} frames it was seen in (
             {done.views.map((v) => `#${v.frame}: ${v.count}${v.tooMany ? " – too many to believe" : ""}`).join(", ")}); the
             most seen at once is shown, leaving out counts over twice Muse Spark&apos;s estimate.
+          </p>
+        ) : null}
+        {done?.method === "frame" && done.spots && done.spots.length > 1 ? (
+          <p className="mt-3 text-sm text-[var(--color-muted)]">
+            Sits in {done.spots.length} places:{" "}
+            {done.spots.map((s) => `${s.count} (frames ${s.frames.map((f) => `#${f}`).join(" ")})`).join(" + ")}. The
+            places are added up; the frame shown is the biggest place.
           </p>
         ) : null}
         {done?.sharing && done.sharing.products === 1 && done.sharing.sortError ? (

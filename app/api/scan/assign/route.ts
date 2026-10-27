@@ -7,6 +7,10 @@ export const maxDuration = 60;
 
 const MAX_LABELS = 80;
 
+function marksOf(item: { marks?: unknown }): string[] {
+  return Array.isArray(item.marks) ? item.marks.map((m) => String(m).slice(0, 60)).slice(0, 8) : [];
+}
+
 /**
  * A frame with SAM's units drawn as numbered boxes in, and which product each
  * number is out (Muse Spark reads the packaging).
@@ -26,7 +30,7 @@ export async function POST(request: Request) {
       throw new BadRequest("Send between 1 and 24 products.");
     }
     const products = raw.map((p) => {
-      const item = (p ?? {}) as { index?: unknown; name?: unknown; brand?: unknown; appearance?: unknown };
+      const item = (p ?? {}) as { index?: unknown; name?: unknown; brand?: unknown; appearance?: unknown; marks?: unknown };
       const index = Number(item.index);
       if (!Number.isInteger(index) || index < 0) throw new BadRequest("Each product needs an index.");
       return {
@@ -34,16 +38,18 @@ export async function POST(request: Request) {
         name: String(item.name ?? "").slice(0, 80),
         brand: String(item.brand ?? "").slice(0, 60),
         appearance: String(item.appearance ?? "").slice(0, 160),
+        marks: marksOf(item),
       };
     });
 
     const othersRaw = form.get("others") ? parseJsonField<unknown>(form.get("others"), "others") : [];
     const others = (Array.isArray(othersRaw) ? othersRaw : []).slice(0, 24).map((p) => {
-      const item = (p ?? {}) as { name?: unknown; brand?: unknown; appearance?: unknown };
+      const item = (p ?? {}) as { name?: unknown; brand?: unknown; appearance?: unknown; marks?: unknown };
       return {
         name: String(item.name ?? "").slice(0, 80),
         brand: String(item.brand ?? "").slice(0, 60),
         appearance: String(item.appearance ?? "").slice(0, 160),
+        marks: marksOf(item),
       };
     });
 

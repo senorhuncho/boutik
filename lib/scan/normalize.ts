@@ -1,4 +1,4 @@
-import type { Confidence, PriceMatch, Product, StallSummary } from "./types.ts";
+import type { Confidence, PriceMatch, Product, Spot, StallSummary } from "./types.ts";
 
 /**
  * Structured output guarantees the shape, not sensible values. These helpers
@@ -90,12 +90,38 @@ export function normalizeIdentify(
       countConfidence: oneOf(item.countConfidence, CONFIDENCE, "low"),
       bestFrame,
       seenIn: [...new Set([...seenIn, bestFrame])].sort((a, b) => a - b),
+      marks: strings(item.marks, 8, 60),
+      spots: normalizeSpots(item.spots, [...new Set([...seenIn, bestFrame])], lastFrame),
       countingNotes: text(item.countingNotes, 240),
       keywords: strings(item.keywords, 8, 40),
     });
     if (products.length >= 24) break;
   }
   return { stall, products };
+}
+
+/**
+ * Spots are the distinct places a product sits. Every frame belongs to at most
+ * one spot (the first that claims it); frames the product is seen in but no
+ * spot claims form one more spot, so no sighting is lost. With nothing usable,
+ * all frames are one spot.
+ */
+function normalizeSpots(raw: unknown, seenIn: number[], lastFrame: number): Spot[] {
+  const taken = new Set<number>();
+  const spots: Spot[] = [];
+  for (const item of Array.isArray(raw) ? raw : []) {
+    if (!isObject(item) || !Array.isArray(item.frames)) continue;
+    const frames = [...new Set(item.frames.filter((f): f is number => Number.isInteger(f) && f >= 0 && f <= lastFrame))]
+      .filter((f) => !taken.has(f))
+      .sort((a, b) => a - b);
+    if (frames.length === 0) continue;
+    frames.forEach((f) => taken.add(f));
+    spots.push({ frames, estimatedCount: int(item.estimatedCount, 0, 5000, 0) });
+    if (spots.length >= 12) break;
+  }
+  const rest = seenIn.filter((f) => !taken.has(f)).sort((a, b) => a - b);
+  if (rest.length > 0) spots.push({ frames: rest, estimatedCount: 0 });
+  return spots;
 }
 
 /** The same spoken price can come back twice, once matched and once not; keep the matched one. */

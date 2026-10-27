@@ -38,8 +38,8 @@ function even(n: number): number {
 /**
  * About 120 frames per clip: 8 fps for short videos, never below 3 fps. A video
  * too long for 240 frames at 3 fps is sampled evenly over its whole length and
- * played faster, because SAM 3.1 drops frames from clips with a fractional
- * frame rate (240 sent, 235 returned) but keeps every frame at a whole one.
+ * played a little faster, so the clip keeps a whole frame rate; clip frame i
+ * is at i × step seconds in the original video.
  */
 export function clipTiming(duration: number): { fps: number; frames: number; step: number } {
   const d = Math.max(0, duration);

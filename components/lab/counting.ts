@@ -3,6 +3,7 @@ import type { ExtractedFrame } from "@/lib/media/browser";
 import type { TrackingClip } from "@/lib/media/clip";
 import { countAtThreshold, filterDetections, topFaces } from "@/lib/scan/accuracy";
 import type { CountGroup, ShapeGroup } from "@/lib/scan/grouping";
+import { GENERIC_SHAPE } from "@/lib/scan/ladder";
 import {
   cameraOffsets,
   clusterAcrossFrames,
@@ -143,6 +144,15 @@ async function sortUnits(
   return { byLabel: sorted.assignments, ms: sorted.ms };
 }
 
+/**
+ * Units found with the generic word ("package") can be any product on the
+ * shelf, so Muse Spark sorts them among all products, not just look-alikes:
+ * asked only "is this soap?", it accepted oil bottles and wipes as soap.
+ */
+function sortPool(word: string, candidates: number[], products: Product[]): number[] {
+  return word === GENERIC_SHAPE && products.length > 1 ? products.map((_, i) => i) : candidates;
+}
+
 /** Counts one frame with SAM image mode; look-alikes are sorted on numbered boxes. */
 async function countFrameGroup(group: CountGroup, ctx: CountContext, why?: string): Promise<Record<number, CountState>> {
   const updates: Record<number, CountState> = {};
@@ -165,20 +175,21 @@ async function countFrameGroup(group: CountGroup, ctx: CountContext, why?: strin
   const labelled = [...found.detections]
     .sort((a, b) => (b.confidence ?? 1) - (a.confidence ?? 1))
     .slice(0, MAX_SORT_LABELS);
+  const pool = sortPool(found.concept, group.candidates, ctx.products);
   let byId = new Map<string, number>();
   let sortMs: number | undefined;
   let sortError: string | undefined;
   if (labelled.length > 0) {
     try {
       const annotated = await drawNumberedBoxes(frame.blob, labelled);
-      const sorted = await sortUnits(annotated, labelled.length, group.candidates, ctx.products);
+      const sorted = await sortUnits(annotated, labelled.length, pool, ctx.products);
       sortMs = sorted.ms;
       byId = new Map(labelled.map((d, k) => [d.id, sorted.byLabel[String(k + 1)] ?? -1]));
     } catch (error) {
       sortError = error instanceof Error ? error.message : "Checking failed";
     }
   }
-  const single = group.candidates.length === 1;
+  const single = pool.length === 1;
   for (const member of group.members) {
     const detections = single || sortError ? found.detections : found.detections.filter((d) => byId.get(d.id) === member);
     const rejected = single && !sortError ? found.detections.filter((d) => byId.get(d.id) !== member).map((d) => d.id) : [];
@@ -217,7 +228,13 @@ export async function countShape(shape: ShapeGroup, ctx: CountContext): Promise<
     form.append("clip", clip.blob, "clip.mp4");
     form.append("concept", shape.concept);
     form.append("fallback", shape.fallback);
-    tracked = await postForm<TrackResult>("/api/scan/track", form);
+    try {
+      tracked = await postForm<TrackResult>("/api/scan/track", form);
+    } catch (error) {
+      // A gateway error with no answer (seen once on a long clip) is worth one more try.
+      if (!(error instanceof Error && /\(50[234]\)/.test(error.message))) throw error;
+      tracked = await postForm<TrackResult>("/api/scan/track", form);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "failed";
     return countByFrames(shape, ctx, `Tracking failed (${message}), counted on single frames.`);
@@ -265,20 +282,21 @@ export async function countShape(shape: ShapeGroup, ctx: CountContext): Promise<
     ms: tracked.ms,
   };
   const updates: Record<number, CountState> = {};
+  const pool = sortPool(tracked.concept, shape.candidates, ctx.products);
   let byLabel: Record<string, number> = {};
   let sortMs: number | undefined;
   let sortError: string | undefined;
   if (tileList.length > 0) {
     try {
       const sheet = await contactSheet(tileList);
-      const sorted = await sortUnits(sheet, tileList.length, shape.candidates, ctx.products);
+      const sorted = await sortUnits(sheet, tileList.length, pool, ctx.products);
       byLabel = sorted.byLabel;
       sortMs = sorted.ms;
     } catch (error) {
       sortError = error instanceof Error ? error.message : "Checking failed";
     }
   }
-  const single = shape.candidates.length === 1;
+  const single = pool.length === 1;
   const sharing = { products: shape.candidates.length, groupFound: units.length, sortMs, sortError };
   for (const candidate of shape.candidates) {
     const mine = single || sortError ? units : units.filter((_, k) => byLabel[String(k + 1)] === candidate);
@@ -308,11 +326,14 @@ async function countAcrossFrames(
   const cover = coverage(offsets, clip);
   const panPx = Math.round(Math.abs(offsets[offsets.length - 1]?.dx ?? 0));
 
+  const pool = sortPool(tracked.concept, shape.candidates, ctx.products);
   const perFrame = await Promise.all(
     ctx.frames.map(async (frame) => {
       const form = new FormData();
       form.append("frame", frame.blob, `frame-${frame.index}.jpg`);
       form.append("concept", tracked.concept);
+      // Every keyframe must look for the same word, or the stall map mixes different finds.
+      form.append("exact", "1");
       form.append("frameIndex", String(frame.index));
       const found = await postForm<CountResult>("/api/scan/count", form);
       const labelled = [...found.detections]
@@ -324,7 +345,7 @@ async function countAcrossFrames(
       if (labelled.length > 0) {
         try {
           const annotated = await drawNumberedBoxes(frame.blob, labelled);
-          const sorted = await sortUnits(annotated, labelled.length, shape.candidates, ctx.products);
+          const sorted = await sortUnits(annotated, labelled.length, pool, ctx.products);
           ms = sorted.ms;
           byId = new Map(labelled.map((d, k) => [d.id, sorted.byLabel[String(k + 1)] ?? -1]));
         } catch {
@@ -337,7 +358,7 @@ async function countAcrossFrames(
   );
 
   const unchecked = perFrame.filter((p) => p.byId === null && p.detections.length > 0).length;
-  const single = shape.candidates.length === 1;
+  const single = pool.length === 1;
   const result: Record<number, CountState> = {};
   const cropJobs = new Map<string, { blob: Blob; box: PanCluster["rep"]["box"] }>();
 

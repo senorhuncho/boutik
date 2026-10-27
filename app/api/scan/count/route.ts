@@ -22,10 +22,12 @@ export async function POST(request: Request) {
     const frameIndex = Number(form.get("frameIndex") ?? 0);
 
     const fallback = cleanSamPrompt(form.get("fallback"), "");
+    // Lining keyframes up needs the same word on every keyframe, so no other words are tried.
+    const exact = form.get("exact") === "1";
     const image = await toDataUrl(frame);
 
     const { word: used, result } = await bestWord(
-      samWords(concept, fallback),
+      exact ? [concept] : samWords(concept, fallback),
       (word) => segmentImage(image, word),
       (r) => r.detections.length,
     );

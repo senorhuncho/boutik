@@ -21,6 +21,8 @@ export async function POST(request: Request) {
     assertLabAccess(request);
     const form = await readForm(request);
     const image = imageFile(form.get("image"), "image");
+    const refFile = form.get("references");
+    const references = refFile instanceof File && refFile.size > 0 ? imageFile(refFile, "references") : null;
     const labels = Number(form.get("labels"));
     if (!Number.isInteger(labels) || labels < 1 || labels > MAX_LABELS) {
       throw new BadRequest(`labels must be between 1 and ${MAX_LABELS}.`);
@@ -53,7 +55,13 @@ export async function POST(request: Request) {
       };
     });
 
-    const { assignments, model } = await assignDetections(await toDataUrl(image), products, labels, others);
+    const { assignments, model } = await assignDetections(
+      await toDataUrl(image),
+      products,
+      labels,
+      others,
+      references ? await toDataUrl(references) : null,
+    );
     return NextResponse.json({
       assignments: Object.fromEntries(assignments),
       model,

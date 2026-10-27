@@ -86,6 +86,44 @@ export interface CountContext {
   video: HTMLVideoElement | null;
   /** Object URLs created here, so the caller can free them. */
   urls: string[];
+  /**
+   * One clearest close-up per product, learned from the first frame sorted
+   * (the way a child learns a new thing from one example and then matches to
+   * it). Later sorts get them as a reference sheet.
+   */
+  exemplars?: Map<number, Blob>;
+}
+
+/** A sheet of each known product's example close-up, labelled with the product index. */
+async function referenceSheet(ctx: CountContext, pool: readonly number[]): Promise<Blob | null> {
+  const tiles = pool
+    .filter((i) => ctx.exemplars?.has(i))
+    .map((i) => ({ label: i, blob: ctx.exemplars?.get(i) as Blob, url: "" }));
+  if (tiles.length === 0) return null;
+  return contactSheet(tiles);
+}
+
+/** Remembers the clearest unit of each product from a sorted frame, once per product. */
+async function learnExemplars(
+  ctx: CountContext,
+  frame: Blob,
+  detections: readonly Detection[],
+  byId: Map<string, number>,
+): Promise<void> {
+  const best = new Map<number, Detection>();
+  for (const d of detections) {
+    const p = byId.get(d.id);
+    if (p === undefined || p < 0 || ctx.exemplars?.has(p)) continue;
+    const have = best.get(p);
+    if (!have || (d.confidence ?? 0) > (have.confidence ?? 0)) best.set(p, d);
+  }
+  if (best.size === 0) return;
+  const entries = [...best];
+  const crops = await cropImages(frame, entries.map(([, d]) => d.box));
+  ctx.exemplars ??= new Map();
+  entries.forEach(([p], k) => {
+    if (!ctx.exemplars?.has(p) && crops[k]) ctx.exemplars?.set(p, crops[k] as Blob);
+  });
 }
 
 interface AssignResponse {
@@ -137,9 +175,11 @@ async function sortUnits(
   labels: number,
   candidates: number[],
   products: Product[],
+  references: Blob | null = null,
 ): Promise<{ byLabel: Record<string, number>; ms: number }> {
   const form = new FormData();
   form.append("image", image, "units.jpg");
+  if (references) form.append("references", references, "references.jpg");
   form.append("labels", String(labels));
   const describe = (i: number) => ({
     index: i,
@@ -183,30 +223,36 @@ async function sortFrameUnits(
   frame: Blob,
   detections: readonly Detection[],
   pool: number[],
-  products: Product[],
+  ctx: CountContext,
 ): Promise<{ byId: Map<string, number>; ms: number }> {
+  const products = ctx.products;
+  const references = await referenceSheet(ctx, pool);
+  let result: { byId: Map<string, number>; ms: number };
   if (pool.length === 1) {
     const annotated = await drawNumberedBoxes(frame, detections);
-    const sorted = await sortUnits(annotated, detections.length, pool, products);
-    return { byId: new Map(detections.map((d, k) => [d.id, sorted.byLabel[String(k + 1)] ?? -1])), ms: sorted.ms };
+    const sorted = await sortUnits(annotated, detections.length, pool, products, references);
+    result = { byId: new Map(detections.map((d, k) => [d.id, sorted.byLabel[String(k + 1)] ?? -1])), ms: sorted.ms };
+  } else {
+    const crops = await cropImages(frame, detections.map((d) => d.box));
+    const starts: number[] = [];
+    for (let s = 0; s < detections.length; s += SHEET_TILES) starts.push(s);
+    const parts = await Promise.all(
+      starts.map(async (start) => {
+        const part = detections.slice(start, start + SHEET_TILES);
+        const sheet = await contactSheet(part.map((_, k) => ({ label: k + 1, blob: crops[start + k] as Blob, url: "" })));
+        return { part, sorted: await sortUnits(sheet, part.length, pool, products, references) };
+      }),
+    );
+    const byId = new Map<string, number>();
+    let ms = 0;
+    for (const { part, sorted } of parts) {
+      ms = Math.max(ms, sorted.ms);
+      part.forEach((d, k) => byId.set(d.id, sorted.byLabel[String(k + 1)] ?? -1));
+    }
+    result = { byId, ms };
   }
-  const crops = await cropImages(frame, detections.map((d) => d.box));
-  const starts: number[] = [];
-  for (let s = 0; s < detections.length; s += SHEET_TILES) starts.push(s);
-  const parts = await Promise.all(
-    starts.map(async (start) => {
-      const part = detections.slice(start, start + SHEET_TILES);
-      const sheet = await contactSheet(part.map((_, k) => ({ label: k + 1, blob: crops[start + k] as Blob, url: "" })));
-      return { part, sorted: await sortUnits(sheet, part.length, pool, products) };
-    }),
-  );
-  const byId = new Map<string, number>();
-  let ms = 0;
-  for (const { part, sorted } of parts) {
-    ms = Math.max(ms, sorted.ms);
-    part.forEach((d, k) => byId.set(d.id, sorted.byLabel[String(k + 1)] ?? -1));
-  }
-  return { byId, ms };
+  await learnExemplars(ctx, frame, detections, result.byId).catch(() => undefined);
+  return result;
 }
 
 /** Counts one frame with SAM image mode; Muse Spark checks or sorts close-ups of every unit. */
@@ -237,7 +283,7 @@ async function countFrameGroup(group: CountGroup, ctx: CountContext, why?: strin
   let sortError: string | undefined;
   if (labelled.length > 0) {
     try {
-      const sorted = await sortFrameUnits(frame.blob, labelled, pool, ctx.products);
+      const sorted = await sortFrameUnits(frame.blob, labelled, pool, ctx);
       sortMs = sorted.ms;
       byId = sorted.byId;
     } catch (error) {
@@ -261,6 +307,20 @@ async function countFrameGroup(group: CountGroup, ctx: CountContext, why?: strin
   return updates;
 }
 
+/** The group whose frame is the best view of the most products of this shape; -1 when there is none. */
+function primaryGroup(shape: ShapeGroup, ctx: CountContext): number {
+  let best = -1;
+  let score = 0;
+  shape.byFrame.forEach((g, k) => {
+    const n = g.members.filter((m) => ctx.products[m]?.bestFrame === g.frame).length;
+    if (n > score) {
+      score = n;
+      best = k;
+    }
+  });
+  return best;
+}
+
 /** Frame searches per shape at once; several shapes are counted at the same time. */
 const FRAME_CONCURRENCY = 4;
 
@@ -273,16 +333,24 @@ const FRAME_CONCURRENCY = 4;
 async function countByFrames(shape: ShapeGroup, ctx: CountContext, why: string): Promise<Record<number, CountState>> {
   const groups = shape.byFrame;
   const parts: Record<number, CountState>[] = new Array(groups.length);
+  const run = async (k: number) => {
+    const group = groups[k] as CountGroup;
+    try {
+      parts[k] = await countFrameGroup(group, ctx, why);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "failed";
+      parts[k] = Object.fromEntries(group.members.map((m) => [m, { state: "error", error: message } as CountState]));
+    }
+  };
+  // The frame that is the best view of most of these products is sorted first, alone, so the sorter learns
+  // one example of each product before it sees the harder frames.
+  const first = primaryGroup(shape, ctx);
+  if (first >= 0 && shape.candidates.length > 1) await run(first);
   let next = 0;
   const worker = async () => {
     for (let k = next++; k < groups.length; k = next++) {
-      const group = groups[k] as CountGroup;
-      try {
-        parts[k] = await countFrameGroup(group, ctx, why);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "failed";
-        parts[k] = Object.fromEntries(group.members.map((m) => [m, { state: "error", error: message } as CountState]));
-      }
+      if (k === first && shape.candidates.length > 1) continue;
+      await run(k);
     }
   };
   await Promise.all(Array.from({ length: Math.min(FRAME_CONCURRENCY, groups.length) }, worker));
@@ -449,6 +517,13 @@ async function countShapeOnce(shape: ShapeGroup, ctx: CountContext): Promise<Rec
     }
   }
 
+  // Look-alikes: learn one example of each product from their best frame before sorting the tracked units.
+  if (shape.candidates.length > 1 && !shape.candidates.every((i) => ctx.exemplars?.has(i))) {
+    const k = primaryGroup(shape, ctx);
+    const group = shape.byFrame[k];
+    if (group) await countFrameGroup(group, ctx).catch(() => undefined);
+  }
+
   const split = splitJumps(tracked.tracks, clip);
   const units = summarizeTracks(split);
   const faces = [...faceTracks(split)];
@@ -479,7 +554,7 @@ async function countShapeOnce(shape: ShapeGroup, ctx: CountContext): Promise<Rec
   if (tileList.length > 0) {
     try {
       const sheet = await contactSheet(tileList);
-      const sorted = await sortUnits(sheet, tileList.length, pool, ctx.products);
+      const sorted = await sortUnits(sheet, tileList.length, pool, ctx.products, await referenceSheet(ctx, pool));
       byLabel = sorted.byLabel;
       sortMs = sorted.ms;
     } catch (error) {
@@ -534,7 +609,7 @@ async function countAcrossFrames(
       let ms = 0;
       if (labelled.length > 0) {
         try {
-          const sorted = await sortFrameUnits(frame.blob, labelled, pool, ctx.products);
+          const sorted = await sortFrameUnits(frame.blob, labelled, pool, ctx);
           ms = sorted.ms;
           byId = sorted.byId;
         } catch {

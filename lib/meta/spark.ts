@@ -9,7 +9,12 @@ type Part = OpenAI.Chat.Completions.ChatCompletionContentPart;
 const IDENTIFY_INSTRUCTIONS = `You catalogue market stalls in Cameroon and Nigeria so traders can sell online.
 You receive frames from one short phone video panning across a single stall, in order.
 
-List every distinct product offered for sale. Different brands are different products. Different sizes of
+List every distinct product offered for sale. Different brands are different products. Packs of the same kind
+of goods with a different printed design (other colours, layout, logo or pictures) are different products EVEN
+WHEN you cannot read a name on either: a shop may stock three brands of sugar whose names are unreadable in the
+frames. Name such a product by what you see ("Sugar, white bag with blue and red print", "Sugar, green-topped
+bag") and put the design differences in its marks, as a shopkeeper tells them apart by look. Compare units of the
+same shape against each other before deciding they are one product. Different sizes of
 the same product are different products only when the size is printed and readable on the packs ("1 L" and
 "5 L") or the units are plainly different sizes side by side; otherwise list them as one product and put the
 sizes you suspect in countingNotes, because a counter cannot tell a 400 g tin from an 800 g one across frames
@@ -269,6 +274,7 @@ export async function assignDetections(
   products: ProductSummary[],
   labelCount: number,
   others: Omit<ProductSummary, "index">[] = [],
+  referencesDataUrl: string | null = null,
 ): Promise<{ assignments: Map<number, number>; model: string }> {
   const describe = (p: Omit<ProductSummary, "index">) =>
     `${p.name}${p.brand ? ` (${p.brand})` : ""}${p.appearance ? `: ${p.appearance}` : ""}` +
@@ -286,7 +292,20 @@ export async function assignDetections(
       {
         role: "user",
         content: [
-          { type: "text", text: `Products:\n${list}${notThese}\n\nThe image shows units numbered 1 to ${labelCount}.` },
+          { type: "text", text: `Products:\n${list}${notThese}` },
+          ...(referencesDataUrl
+            ? [
+                {
+                  type: "text" as const,
+                  text:
+                    "Reference sheet: one example unit of each product already identified, cropped from this same video. " +
+                    "The number on a reference tile is the PRODUCT INDEX, not a unit number. Match each unit to the reference " +
+                    "it looks like (same print, colours, size), the way you would recognise a thing from one example.",
+                },
+                { type: "image_url" as const, image_url: { url: referencesDataUrl } },
+              ]
+            : []),
+          { type: "text", text: `The next image shows units numbered 1 to ${labelCount}.` },
           { type: "image_url", image_url: { url: annotatedDataUrl } },
         ],
       },

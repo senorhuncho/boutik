@@ -399,7 +399,9 @@ async function countByFrames(shape: ShapeGroup, ctx: CountContext, why: string):
     if (spots.length === 0) continue;
     let total = spots.reduce((sum, s) => sum + s.count, 0);
     let kept = spots;
-    if (spots.length > 1 && total > estimate + 2) {
+    // Adding places up is off until a video with two real places confirms it: on the shop video the noodle
+    // pile filmed again from above came back as a second place twice, and once Muse Spark's estimate agreed.
+    if (spots.length > 1) {
       // The places add up to more than Muse Spark counted in the whole video, so one place was listed twice
       // (a pile filmed again from above came back as a second spot and doubled the noodles).
       const largest = spots.reduce((a, b) => (b.count > a.count ? b : a));

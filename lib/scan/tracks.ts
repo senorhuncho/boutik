@@ -156,10 +156,13 @@ export function filterTracks(
 
   const inside = kept.filter((u) => !touchesEdge(u, clip));
   if (inside.length === 0) return { kept, dropped };
-  const smallestInside = Math.min(...inside.map(area));
+  // A unit never seen whole is a partial view when it is clearly smaller than the whole ones: well under the
+  // smallest whole unit, not just under it, or one close-up carton filmed from near sets a bar that drops
+  // every carton further along the shelf (10 of 14 Phosphatine).
+  const bar = Math.min(...inside.map(area)) * (inside.length >= 3 ? 0.8 : 0.5);
   const final: UnitTrack[] = [];
   for (const unit of kept) {
-    if (touchesEdge(unit, clip) && area(unit) < smallestInside) dropped.push({ unit, reason: "partly out of view" });
+    if (touchesEdge(unit, clip) && area(unit) < bar) dropped.push({ unit, reason: "partly out of view" });
     else final.push(unit);
   }
   return { kept: final, dropped };

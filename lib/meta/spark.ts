@@ -9,8 +9,11 @@ type Part = OpenAI.Chat.Completions.ChatCompletionContentPart;
 const IDENTIFY_INSTRUCTIONS = `You catalogue market stalls in Cameroon and Nigeria so traders can sell online.
 You receive frames from one short phone video panning across a single stall, in order.
 
-List every distinct product offered for sale. Treat different sizes or brands as different products
-(for example "Mayor oil 1 L" and "Mayor oil 5 L"). Ignore the trader, customers, shelves, scales and money.
+List every distinct product offered for sale. Different brands are different products. Different sizes of
+the same product are different products only when the size is printed and readable on the packs ("1 L" and
+"5 L") or the units are plainly different sizes side by side; otherwise list them as one product and put the
+sizes you suspect in countingNotes, because a counter cannot tell a 400 g tin from an 800 g one across frames
+and would count the same tins twice. Ignore the trader, customers, shelves, scales and money.
 
 Read the packaging the way a shopkeeper does: every printed word you can make out, the maker's logo, the
 colours, the pictures, the pack's shape and its size next to its neighbours. Zoom into the frames in your mind;

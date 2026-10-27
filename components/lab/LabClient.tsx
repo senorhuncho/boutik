@@ -749,34 +749,45 @@ function UnitGrid({
       </div>
     );
   }
-  const reasons = new Map(dropped.map((d) => [d.id, d.reason]));
-  const order = [...kept, ...dropped.map((d) => d.id)];
+  const tile = (id: string, label: string | null, reason: DropReason | null) => {
+    const url = tiles[id];
+    return (
+      <figure key={id} className={`relative overflow-hidden rounded-lg bg-black/5 ${reason ? "opacity-50" : ""}`}>
+        {url ? (
+          // eslint-disable-next-line @next/next/no-img-element -- local blob URL
+          <img src={url} alt="" className="aspect-square w-full object-cover" />
+        ) : (
+          <div className="aspect-square w-full" />
+        )}
+        {reason ? (
+          <figcaption className="absolute inset-x-0 bottom-0 bg-black/70 px-1 py-0.5 text-center text-[10px] leading-tight text-white">
+            {reason}
+          </figcaption>
+        ) : (
+          <span className="absolute left-1 top-1 rounded bg-[rgb(249_115_22)] px-1.5 text-xs font-bold text-white">
+            {label}
+          </span>
+        )}
+      </figure>
+    );
+  };
   return (
-    <div className="grid grid-cols-4 gap-1.5 bg-[var(--color-paper)] p-2 sm:grid-cols-6">
-      {order.map((id) => {
-        const url = tiles[id];
-        const reason = reasons.get(id);
-        const number = kept.indexOf(id) + 1;
-        return (
-          <figure key={id} className={`relative overflow-hidden rounded-lg bg-black/5 ${reason ? "opacity-40" : ""}`}>
-            {url ? (
-              // eslint-disable-next-line @next/next/no-img-element -- local blob URL
-              <img src={url} alt="" className="aspect-square w-full object-cover" />
-            ) : (
-              <div className="aspect-square w-full" />
-            )}
-            {reason ? (
-              <figcaption className="absolute inset-x-0 bottom-0 bg-black/70 px-1 py-0.5 text-center text-[10px] leading-tight text-white">
-                {reason}
-              </figcaption>
-            ) : (
-              <span className="absolute left-1 top-1 rounded bg-[rgb(249_115_22)] px-1.5 text-xs font-bold text-white">
-                {number}
-              </span>
-            )}
-          </figure>
-        );
-      })}
+    <div className="bg-[var(--color-paper)] p-2">
+      {kept.length > 0 ? (
+        <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6">{kept.map((id, i) => tile(id, String(i + 1), null))}</div>
+      ) : (
+        <p className="px-2 py-4 text-center text-sm text-[var(--color-muted)]">No units counted at this confidence.</p>
+      )}
+      {dropped.length > 0 ? (
+        <details className="mt-2">
+          <summary className="cursor-pointer select-none px-1 py-1.5 text-sm text-[var(--color-muted)]">
+            Show {dropped.length} set aside
+          </summary>
+          <div className="mt-1.5 grid grid-cols-4 gap-1.5 sm:grid-cols-6">
+            {dropped.map((d) => tile(d.id, null, d.reason))}
+          </div>
+        </details>
+      ) : null}
     </div>
   );
 }

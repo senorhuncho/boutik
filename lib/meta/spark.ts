@@ -38,9 +38,10 @@ For each product:
 - samFallback: a synonym for the same shape, tried if the first finds nothing ("box" for carton, "sack" for
   bag, "bunch of bananas" for plantains, "container" for a tub).
 - unit: the selling unit (bag, bottle, carton, tin, bunch, heap, basin, piece...).
-- estimatedCount: your best count of the units in the shop, across all spots: the ones you can see plus the
-  ones that must be behind or under them (a row of boxes going back on a shelf, a pile several packs deep).
-  Do not double count units that appear in several frames because the camera moved.
+- estimatedCount: your best count of the units in the shop, across all spots. Count the units you can see;
+  add units behind or under them only when the frames show them (the side of a row going back, the edge of a
+  pack under another), never a guess of how deep a shelf might be. A careful shopkeeper's count, not a high
+  one. Do not double count units that appear in several frames because the camera moved.
 - countConfidence: low if units are stacked, hidden or overlapping; high only if each unit is clearly separate.
 - bestFrame: the 0-based index of the frame where this product's whole group is most visible and sharp.
 - seenIn: the 0-based index of every frame where at least one unit of this product is visible. A shop

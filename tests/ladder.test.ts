@@ -32,3 +32,16 @@ test("when every word finds nothing the first word is reported", async () => {
   const pick = await bestWord(samWords("bunch", "banana"), async () => 0, (n) => n);
   assert.deepEqual(pick, { word: "bunch", result: 0 });
 });
+
+test("for soft packs the generic word is always tried too and the larger find kept", async () => {
+  // Noodle sachets: packet found 17 in front, package 33 including the stacked ends.
+  const counts: Record<string, number> = { sachet: 17, packet: 20, package: 33 };
+  const tried: string[] = [];
+  const pick = await bestWord(samWords("sachet", "packet"), async (w) => (tried.push(w), counts[w] ?? 0), (n) => n);
+  assert.deepEqual(pick, { word: "package", result: 33 });
+  assert.deepEqual(tried, ["sachet", "package"], "the fallback is skipped once the first word found enough");
+  // Tins: the generic word finds no tins, so it is not tried when "tin" found enough.
+  const tins: string[] = [];
+  await bestWord(samWords("tin", "can"), async (w) => (tins.push(w), 9), (n) => n);
+  assert.deepEqual(tins, ["tin"]);
+});

@@ -732,7 +732,8 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
         {done?.method === "frame" && done.views && done.views.length > 1 ? (
           <p className="mt-3 text-sm text-[var(--color-muted)]">
             Counted on the {done.views.length} frames it was seen in (
-            {done.views.map((v) => `#${v.frame}: ${v.count}`).join(", ")}); the most seen at once is shown.
+            {done.views.map((v) => `#${v.frame}: ${v.count}${v.tooMany ? " – too many to believe" : ""}`).join(", ")}); the
+            most seen at once is shown, leaving out counts over twice Muse Spark&apos;s estimate.
           </p>
         ) : null}
         {done?.sharing && done.sharing.products === 1 && done.sharing.sortError ? (

@@ -4,6 +4,7 @@ import type { TrackingClip } from "@/lib/media/clip";
 import { countAtThreshold, filterDetections, topFaces } from "@/lib/scan/accuracy";
 import type { CountGroup, ShapeGroup } from "@/lib/scan/grouping";
 import { GENERIC_SHAPE } from "@/lib/scan/ladder";
+import { pickView, plausibleCap } from "@/lib/scan/views";
 import {
   cameraOffsets,
   clusterAcrossFrames,
@@ -66,8 +67,8 @@ export type CountState =
       faces: string[];
       sharing: Sharing | null;
       why?: string;
-      /** The count on every frame this product was seen in; the highest one is shown. */
-      views?: { frame: number; count: number }[];
+      /** The count on every frame this product was seen in; the highest believable one is shown. */
+      views?: { frame: number; count: number; tooMany: boolean }[];
     }
   | { state: "done"; method: "track"; track: TrackedCount; sharing: Sharing | null }
   | { state: "error"; error: string };
@@ -236,25 +237,27 @@ async function countByFrames(shape: ShapeGroup, ctx: CountContext, why: string):
   };
   await Promise.all(Array.from({ length: Math.min(FRAME_CONCURRENCY, groups.length) }, worker));
 
-  const best: Record<number, CountState> = {};
-  const views: Record<number, { frame: number; count: number }[]> = {};
+  const seen: Record<number, { frame: number; count: number | null; state: CountState }[]> = {};
   parts.forEach((part, k) => {
     const frame = (groups[k] as CountGroup).frame;
     for (const [key, state] of Object.entries(part)) {
-      const m = Number(key);
-      const n = samCount(state, DEFAULT_THRESHOLD);
-      if (n !== null) (views[m] ??= []).push({ frame, count: n });
-      const current = best[m];
-      const have = samCount(current, DEFAULT_THRESHOLD);
-      const preferred = ctx.products[m]?.bestFrame === frame;
-      if (!current || (n !== null && (have === null || n > have || (n === have && preferred)))) best[m] = state;
+      (seen[Number(key)] ??= []).push({ frame, count: samCount(state, DEFAULT_THRESHOLD), state });
     }
   });
-  for (const [key, state] of Object.entries(best)) {
-    const list = views[Number(key)];
-    if (state.state === "done" && state.method === "frame" && list) {
-      best[Number(key)] = { ...state, views: list.sort((a, b) => a.frame - b.frame) };
-    }
+
+  const best: Record<number, CountState> = {};
+  for (const [key, list] of Object.entries(seen)) {
+    const m = Number(key);
+    const product = ctx.products[m];
+    list.sort((a, b) => a.frame - b.frame);
+    const pick = pickView(list, product?.estimatedCount ?? 0, product?.bestFrame ?? 0);
+    const chosen = list[pick] ?? list[0];
+    if (!chosen) continue;
+    const cap = plausibleCap(product?.estimatedCount ?? 0);
+    const views = list
+      .filter((v) => v.count !== null)
+      .map((v) => ({ frame: v.frame, count: v.count as number, tooMany: (v.count as number) > cap }));
+    best[m] = chosen.state.state === "done" && chosen.state.method === "frame" ? { ...chosen.state, views } : chosen.state;
   }
   return best;
 }
@@ -267,6 +270,54 @@ async function countByFrames(shape: ShapeGroup, ctx: CountContext, why: string):
  * reaches its 16-object tracking limit, or tracking fails.
  */
 export async function countShape(shape: ShapeGroup, ctx: CountContext): Promise<Record<number, CountState>> {
+  return rescueMissing(shape, ctx, await countShapeOnce(shape, ctx));
+}
+
+/**
+ * A product of a shared shape can come out at 0 when SAM's word finds the
+ * others but not it: "bag" found 7 diaper bags and none of the sugar bags,
+ * which "package" finds. Those products are looked for again with the generic
+ * word on the frames they are seen in, sorted among all products.
+ */
+async function rescueMissing(
+  shape: ShapeGroup,
+  ctx: CountContext,
+  updates: Record<number, CountState>,
+): Promise<Record<number, CountState>> {
+  if (shape.concept === GENERIC_SHAPE) return updates;
+  const missing = shape.candidates.filter((i) => samCount(updates[i], DEFAULT_THRESHOLD) === 0);
+  if (missing.length === 0) return updates;
+  const frames = new Map<number, number[]>();
+  for (const i of missing) {
+    const product = ctx.products[i];
+    for (const f of new Set([...(product?.seenIn ?? []), product?.bestFrame ?? 0])) frames.set(f, [...(frames.get(f) ?? []), i]);
+  }
+  const retry: ShapeGroup = {
+    concept: GENERIC_SHAPE,
+    fallback: "",
+    candidates: missing,
+    byFrame: [...frames]
+      .sort((a, b) => a[0] - b[0])
+      .map(([frame, members]) => ({ concept: GENERIC_SHAPE, fallback: "", frame, members, candidates: missing })),
+  };
+  let found: Record<number, CountState>;
+  try {
+    found = await countByFrames(
+      retry,
+      ctx,
+      `“${shape.concept}” found none of these, so SAM looked for “${GENERIC_SHAPE}” and Muse Spark sorted what it found among all products.`,
+    );
+  } catch {
+    return updates;
+  }
+  const out = { ...updates };
+  for (const i of missing) {
+    if ((samCount(found[i], DEFAULT_THRESHOLD) ?? 0) > 0) out[i] = found[i] as CountState;
+  }
+  return out;
+}
+
+async function countShapeOnce(shape: ShapeGroup, ctx: CountContext): Promise<Record<number, CountState>> {
   const { clip, video } = ctx;
   if (!clip || !video) return countByFrames(shape, ctx, ctx.noClip ?? "This phone could not make a tracking clip.");
 

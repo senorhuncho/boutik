@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { MODELS } from "@/lib/meta/client";
 import { segmentVideo } from "@/lib/meta/sam";
-import { GENERIC_SHAPE, alwaysTryGeneric, bestWordParallel } from "@/lib/scan/ladder";
+import { GENERIC_SHAPE, alwaysTryGeneric, bestWord, bestWordParallel } from "@/lib/scan/ladder";
 import { cleanSamPrompt } from "@/lib/scan/normalize";
 import { BadRequest, assertLabAccess, jsonError, readForm } from "@/lib/scan/http";
 import type { TrackResult } from "@/lib/scan/types";
@@ -33,12 +33,13 @@ export async function POST(request: Request) {
     const dataUrl = `data:${clip.type};base64,${Buffer.from(await clip.arrayBuffer()).toString("base64")}`;
     // A video search takes 10–30 s, so two words at most, side by side, or the function times out (502s
     // appeared when soft packs tried three words one after another).
-    const words = alwaysTryGeneric(concept) ? [concept, GENERIC_SHAPE] : [concept, fallback || concept];
-    const { word: used, result } = await bestWordParallel(
-      [...new Set(words)],
-      (word) => segmentVideo(dataUrl, word),
-      (r) => r.tracks.length,
-    );
+    // Other shapes keep the fallback for when the first word finds almost nothing: tried side by side,
+    // "container" beat "bottle" on oil by also finding jars.
+    const run = (word: string) => segmentVideo(dataUrl, word);
+    const found = (r: Awaited<ReturnType<typeof segmentVideo>>) => r.tracks.length;
+    const { word: used, result } = alwaysTryGeneric(concept)
+      ? await bestWordParallel([...new Set([concept, GENERIC_SHAPE])], run, found)
+      : await bestWord([...new Set([concept, fallback || concept])], run, found);
     const body: TrackResult = {
       concept: used,
       usedFallback: used !== concept,

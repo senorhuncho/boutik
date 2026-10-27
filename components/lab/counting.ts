@@ -1,4 +1,4 @@
-import { contactSheet, cropImage, cropImages, cropUnit, type Tile } from "@/lib/media/annotate";
+import { contactSheet, cropImage, cropImages, cropUnit, drawNumberedBoxes, type Tile } from "@/lib/media/annotate";
 import type { ExtractedFrame } from "@/lib/media/browser";
 import type { TrackingClip } from "@/lib/media/clip";
 import { countAtThreshold, filterDetections, topFaces } from "@/lib/scan/accuracy";
@@ -162,10 +162,14 @@ function sortPool(word: string, candidates: number[], products: Product[]): numb
 const SHEET_TILES = 25;
 
 /**
- * Muse Spark reads close-ups far better than numbered boxes drawn on a photo:
- * on a small frame the number covers a tin's label, and 11 Broli tins came
- * back as France Lait and NAN; from close-ups it read 11 Broli. Each unit is
- * cropped from the keyframe with its outline, 25 to a sheet.
+ * Telling look-alikes apart, Muse Spark reads close-ups far better than
+ * numbered boxes drawn on a photo: on a small frame the number covers a tin's
+ * label, and 11 Broli tins came back as France Lait and NAN; from close-ups it
+ * read 11 Broli. Each unit is cropped from the keyframe with its outline, 25
+ * to a sheet. Checking a single product keeps the whole photo, because there
+ * the question is whether a unit belongs to this stall or one behind it, which
+ * a close-up hides (rice bags on the stall behind passed as the trader's: 37
+ * instead of 12).
  */
 async function sortFrameUnits(
   frame: Blob,
@@ -173,6 +177,11 @@ async function sortFrameUnits(
   pool: number[],
   products: Product[],
 ): Promise<{ byId: Map<string, number>; ms: number }> {
+  if (pool.length === 1) {
+    const annotated = await drawNumberedBoxes(frame, detections);
+    const sorted = await sortUnits(annotated, detections.length, pool, products);
+    return { byId: new Map(detections.map((d, k) => [d.id, sorted.byLabel[String(k + 1)] ?? -1])), ms: sorted.ms };
+  }
   const crops = await cropImages(frame, detections.map((d) => d.box));
   const starts: number[] = [];
   for (let s = 0; s < detections.length; s += SHEET_TILES) starts.push(s);

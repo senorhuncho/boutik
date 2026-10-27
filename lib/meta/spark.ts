@@ -238,10 +238,16 @@ export async function assignDetections(
   annotatedDataUrl: string,
   products: { index: number; name: string; brand: string; appearance: string }[],
   labelCount: number,
+  others: { name: string; brand: string; appearance: string }[] = [],
 ): Promise<{ assignments: Map<number, number>; model: string }> {
-  const list = products
-    .map((p) => `${p.index}. ${p.name}${p.brand ? ` (${p.brand})` : ""}${p.appearance ? `: ${p.appearance}` : ""}`)
-    .join("\n");
+  const describe = (p: { name: string; brand: string; appearance: string }) =>
+    `${p.name}${p.brand ? ` (${p.brand})` : ""}${p.appearance ? `: ${p.appearance}` : ""}`;
+  const list = products.map((p) => `${p.index}. ${describe(p)}`).join("\n");
+  const notThese = others.length
+    ? `\n\nAlso seen in this video, and NOT any of the products above (a unit that is one of these gets -1):\n${others
+        .map((p) => `- ${describe(p)}`)
+        .join("\n")}`
+    : "";
   const completion = await meta().chat.completions.create({
     model: MODELS.vision,
     messages: [
@@ -249,7 +255,7 @@ export async function assignDetections(
       {
         role: "user",
         content: [
-          { type: "text", text: `Products:\n${list}\n\nThe image shows units numbered 1 to ${labelCount}.` },
+          { type: "text", text: `Products:\n${list}${notThese}\n\nThe image shows units numbered 1 to ${labelCount}.` },
           { type: "image_url", image_url: { url: annotatedDataUrl } },
         ],
       },

@@ -37,7 +37,17 @@ export async function POST(request: Request) {
       };
     });
 
-    const { assignments, model } = await assignDetections(await toDataUrl(image), products, labels);
+    const othersRaw = form.get("others") ? parseJsonField<unknown>(form.get("others"), "others") : [];
+    const others = (Array.isArray(othersRaw) ? othersRaw : []).slice(0, 24).map((p) => {
+      const item = (p ?? {}) as { name?: unknown; brand?: unknown; appearance?: unknown };
+      return {
+        name: String(item.name ?? "").slice(0, 80),
+        brand: String(item.brand ?? "").slice(0, 60),
+        appearance: String(item.appearance ?? "").slice(0, 160),
+      };
+    });
+
+    const { assignments, model } = await assignDetections(await toDataUrl(image), products, labels, others);
     return NextResponse.json({
       assignments: Object.fromEntries(assignments),
       model,

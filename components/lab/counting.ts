@@ -134,17 +134,17 @@ async function sortUnits(
   const form = new FormData();
   form.append("image", image, "units.jpg");
   form.append("labels", String(labels));
-  form.append(
-    "products",
-    JSON.stringify(
-      candidates.map((i) => ({
-        index: i,
-        name: products[i]?.name,
-        brand: products[i]?.brand,
-        appearance: products[i]?.appearance,
-      })),
-    ),
-  );
+  const describe = (i: number) => ({
+    index: i,
+    name: products[i]?.name,
+    brand: products[i]?.brand,
+    appearance: products[i]?.appearance,
+  });
+  form.append("products", JSON.stringify(candidates.map(describe)));
+  // The rest of the scan, so Muse Spark knows what a unit may be instead: checking "custard tub" alone, it
+  // accepted 20 Broli tins as custard.
+  const pool = new Set(candidates);
+  form.append("others", JSON.stringify(products.map((_, i) => i).filter((i) => !pool.has(i)).map(describe)));
   const sorted = await postForm<AssignResponse>("/api/scan/assign", form);
   return { byLabel: sorted.assignments, ms: sorted.ms };
 }
@@ -388,14 +388,14 @@ async function countShapeOnce(shape: ShapeGroup, ctx: CountContext): Promise<Rec
       return countByFrames(
         shape,
         ctx,
-        "More than 16 alike in view, and the camera did not move in a steady pan, so the frames could not be lined up. Counted on the clearest frame.",
+        "More than 16 alike in view, and the camera did not move in a steady pan, so the frames could not be lined up. Counted on each frame it appears in, keeping the most seen at once.",
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "failed";
       return countByFrames(
         shape,
         ctx,
-        `More than 16 alike in view and matching across frames failed (${message}), so these were counted on the clearest frame.`,
+        `More than 16 alike in view and matching across frames failed (${message}), so these were counted on each frame they appear in, keeping the most seen at once.`,
       );
     }
   }

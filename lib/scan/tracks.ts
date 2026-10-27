@@ -1,4 +1,4 @@
-import { filterDetections, type DropReason } from "./accuracy.ts";
+import { filterDetections, topFaces, type DropReason } from "./accuracy.ts";
 import type { Detection, Track, TrackResult } from "./types.ts";
 
 /** SAM 3.1 follows at most 16 objects through a video. More units than that need frame-by-frame counting. */
@@ -135,11 +135,13 @@ export function filterTracks(
   threshold: number,
   clip: { width: number; height: number },
   rejected: Rejected = new Set(),
+  faces: ReadonlySet<string> = new Set(),
 ): FilteredUnits {
   const dropped: FilteredUnits["dropped"] = [];
   const candidates: UnitTrack[] = [];
   for (const unit of units) {
-    if (rejected.has(unit.id)) dropped.push({ unit, reason: "not this product" });
+    if (faces.has(unit.id)) dropped.push({ unit, reason: "another side" });
+    else if (rejected.has(unit.id)) dropped.push({ unit, reason: "not this product" });
     else if (unit.seen < 2) dropped.push({ unit, reason: "seen once" });
     else candidates.push(unit);
   }
@@ -161,4 +163,34 @@ export function filterTracks(
     else final.push(unit);
   }
   return { kept: final, dropped };
+}
+
+/**
+ * Tracks that are the top of another tracked unit (see topFaces), judged
+ * frame by frame: a track counts as a top when it was one in at least half of
+ * the frames it was seen in, and at least twice.
+ */
+export function faceTracks(tracks: readonly Track[]): Set<string> {
+  const byFrame = new Map<number, { id: string; box: { left: number; top: number; right: number; bottom: number } }[]>();
+  const seen = new Map<string, number>();
+  for (const track of tracks) {
+    const frames = new Set<number>();
+    for (const box of track.boxes) {
+      if (frames.has(box.f)) continue;
+      frames.add(box.f);
+      const list = byFrame.get(box.f) ?? [];
+      list.push({ id: track.id, box: { left: box.b[0], top: box.b[1], right: box.b[2], bottom: box.b[3] } });
+      byFrame.set(box.f, list);
+    }
+    seen.set(track.id, frames.size);
+  }
+  const flagged = new Map<string, number>();
+  for (const list of byFrame.values()) {
+    for (const id of topFaces(list)) flagged.set(id, (flagged.get(id) ?? 0) + 1);
+  }
+  const faces = new Set<string>();
+  for (const [id, n] of flagged) {
+    if (n >= 2 && n >= 0.5 * (seen.get(id) ?? Infinity)) faces.add(id);
+  }
+  return faces;
 }

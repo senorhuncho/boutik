@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   cleanSamPrompt,
   isNoSpeech,
@@ -9,7 +10,7 @@ import {
   transcriptionKeywords,
 } from "../lib/scan/normalize.ts";
 import { groupForCounting, shapeGroups } from "../lib/scan/grouping.ts";
-import { countAtThreshold, filterDetections, scoreMethods } from "../lib/scan/accuracy.ts";
+import { countAtThreshold, filterDetections, scoreMethods, topFaces } from "../lib/scan/accuracy.ts";
 import type { Detection } from "../lib/scan/types.ts";
 
 test("cleanSamPrompt keeps one short noun phrase", () => {
@@ -272,4 +273,39 @@ test("shapeGroups gives one video search per shape with its frame groups", () =>
       ["bag", [2], [[1, [2]]]],
     ],
   );
+});
+
+test("carton tops outlined separately by SAM are not counted twice (real data)", () => {
+  const fx = JSON.parse(
+    readFileSync(new URL("./fixtures/warehouse-carton-faces.json", import.meta.url), "utf8"),
+  ) as Record<string, { id: string; box: Detection["box"]; confidence: number }[]>;
+  const asDetections = (list: { id: string; box: Detection["box"]; confidence: number }[]): Detection[] =>
+    list.map((d) => ({ ...d, maskPath: null, maskBounds: null, maskSize: null }));
+
+  // Frame 3: strips 0, 5 and 9 sit right on the front faces 25, 19 and 1.
+  const onion = asDetections(fx.frame3_onion ?? []);
+  const onionTops = topFaces(onion);
+  assert.deepEqual([...onionTops].sort(), ["0", "5", "9"]);
+  // With those tops gone, the two remaining strips (tops of cartons further back, fronts hidden) are far smaller
+  // than every front face, so the size rule sets them aside: the 5 cartons with a visible front count.
+  const onionView = filterDetections(onion, 0.5, { faces: onionTops });
+  assert.equal(onionView.kept.length, 5);
+  assert.deepEqual(onionView.dropped.map((d) => d.reason).sort(), ["another side", "another side", "another side", "too small", "too small"]);
+
+  // Frame 0: strip 0 was sorted as Hungry Man but is the top of Super Pack carton 13.
+  const frame0 = asDetections([...(fx.frame0_superpack ?? []), ...(fx.frame0_hungryman ?? [])]);
+  const frame0Tops = topFaces(frame0);
+  assert.deepEqual([...frame0Tops], ["0"]);
+  assert.equal(countAtThreshold(asDetections(fx.frame0_hungryman ?? []), 0.5, new Set(), frame0Tops), 2);
+  assert.equal(countAtThreshold(asDetections(fx.frame0_superpack ?? []), 0.5, new Set(), frame0Tops), 10);
+});
+
+test("topFaces leaves a small box standing on a big one, and strips cut off by the picture edge", () => {
+  const box = (id: string, left: number, top: number, right: number, bottom: number) => ({ id, box: { left, top, right, bottom } });
+  // A small carton (taller than a strip) on a big carton, and a strip at the very top of the picture.
+  assert.equal(topFaces([box("big", 0, 200, 300, 500), box("small", 50, 90, 250, 205)]).size, 0);
+  assert.equal(topFaces([box("big", 0, 40, 300, 340), box("edge", 0, 0, 300, 45)]).size, 0);
+  // One face has one top: the closer strip wins.
+  const tops = topFaces([box("face", 0, 200, 300, 500), box("near", 10, 160, 290, 205), box("far", 10, 130, 290, 170)]);
+  assert.deepEqual([...tops], ["near"]);
 });

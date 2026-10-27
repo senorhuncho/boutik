@@ -322,14 +322,21 @@ export function LabClient() {
                 setAside: f.dropped.map((x) => ({ key: x.cluster.key, reason: x.reason })),
                 clusters: clusters.map((c) => ({
                   key: c.key,
-                  rep: { frame: c.rep.frame, id: c.rep.id, box: c.rep.box, confidence: c.rep.confidence, rejected: c.rep.rejected },
+                  rep: {
+                    frame: c.rep.frame,
+                    id: c.rep.id,
+                    box: c.rep.box,
+                    confidence: c.rep.confidence,
+                    rejected: c.rep.rejected,
+                    face: c.rep.face,
+                  },
                   members: c.members.map((m) => ({ frame: m.frame, id: m.id })),
                 })),
               },
             ];
           }
           if (v.method === "track") {
-            const f = filterTracks(v.track.units, threshold, v.track.clip, new Set(v.track.rejected));
+            const f = filterTracks(v.track.units, threshold, v.track.clip, new Set(v.track.rejected), new Set(v.track.faces));
             const { tiles: _tiles, ...track } = v.track;
             return [
               k,
@@ -350,7 +357,10 @@ export function LabClient() {
               ...v.result,
               sharing: v.sharing,
               count: samCount(v, threshold),
-              setAside: filterDetections(v.result.detections, threshold, { rejected: new Set(v.rejected) }).dropped.map((x) => ({
+              setAside: filterDetections(v.result.detections, threshold, {
+                rejected: new Set(v.rejected),
+                faces: new Set(v.faces),
+              }).dropped.map((x) => ({
                 id: x.detection.id,
                 reason: x.reason,
               })),
@@ -570,11 +580,14 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
   const done = count?.state === "done" ? count : null;
   const frameView =
     done?.method === "frame"
-      ? filterDetections(done.result.detections, threshold, { rejected: new Set(done.rejected) })
+      ? filterDetections(done.result.detections, threshold, {
+          rejected: new Set(done.rejected),
+          faces: new Set(done.faces),
+        })
       : null;
   const trackView =
     done?.method === "track"
-      ? filterTracks(done.track.units, threshold, done.track.clip, new Set(done.track.rejected))
+      ? filterTracks(done.track.units, threshold, done.track.clip, new Set(done.track.rejected), new Set(done.track.faces))
       : null;
   const panView = done?.method === "pan" ? filterPanClusters(done.pan.clusters, threshold) : null;
   const sam = samCount(count, threshold);
@@ -793,6 +806,7 @@ function UnitGrid({
 }
 
 const DROP_LABELS: Record<DropReason, string> = {
+  "another side": "the top of a unit already counted",
   "too small": "too small, probably further back",
   "too large": "too large, probably a whole stack",
   "low confidence": "below the confidence line",

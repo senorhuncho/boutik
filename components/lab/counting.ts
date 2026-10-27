@@ -1,7 +1,7 @@
 import { contactSheet, cropImage, cropUnit, drawNumberedBoxes, type Tile } from "@/lib/media/annotate";
 import type { ExtractedFrame } from "@/lib/media/browser";
 import type { TrackingClip } from "@/lib/media/clip";
-import { countAtThreshold, filterDetections } from "@/lib/scan/accuracy";
+import { countAtThreshold, filterDetections, topFaces } from "@/lib/scan/accuracy";
 import type { CountGroup, ShapeGroup } from "@/lib/scan/grouping";
 import {
   cameraOffsets,
@@ -13,7 +13,7 @@ import {
   panPlausible,
   type PanCluster,
 } from "@/lib/scan/panorama";
-import { filterTracks, isSaturated, splitJumps, summarizeTracks, type UnitTrack } from "@/lib/scan/tracks";
+import { faceTracks, filterTracks, isSaturated, splitJumps, summarizeTracks, type UnitTrack } from "@/lib/scan/tracks";
 import type { CountResult, Product, TrackResult } from "@/lib/scan/types";
 
 /** How a product's units were found when it looks like other products. */
@@ -32,6 +32,8 @@ export interface TrackedCount {
   units: UnitTrack[];
   /** Units Muse Spark said are not this product. */
   rejected: string[];
+  /** Units that are the top of another tracked unit. */
+  faces: string[];
   /** Close-up of each unit's clearest view, by unit id. */
   tiles: Record<string, string>;
   clip: { width: number; height: number; fps: number; frames: number };
@@ -54,7 +56,16 @@ export interface PanCount {
 export type CountState =
   | { state: "loading" }
   | { state: "done"; method: "pan"; pan: PanCount; sharing: Sharing | null }
-  | { state: "done"; method: "frame"; result: CountResult; rejected: string[]; sharing: Sharing | null; why?: string }
+  | {
+      state: "done";
+      method: "frame";
+      result: CountResult;
+      rejected: string[];
+      /** Detections that are the top of another unit in the frame. */
+      faces: string[];
+      sharing: Sharing | null;
+      why?: string;
+    }
   | { state: "done"; method: "track"; track: TrackedCount; sharing: Sharing | null }
   | { state: "error"; error: string };
 
@@ -85,9 +96,17 @@ export async function postForm<T>(url: string, form: FormData): Promise<T> {
 /** SAM's count for a product at the current confidence threshold, whichever way it was counted. */
 export function samCount(state: CountState | undefined, threshold: number): number | null {
   if (state?.state !== "done") return null;
-  if (state.method === "frame") return countAtThreshold(state.result.detections, threshold, new Set(state.rejected));
+  if (state.method === "frame") {
+    return countAtThreshold(state.result.detections, threshold, new Set(state.rejected), new Set(state.faces));
+  }
   if (state.method === "pan") return filterPanClusters(state.pan.clusters, threshold).kept.length;
-  return filterTracks(state.track.units, threshold, state.track.clip, new Set(state.track.rejected)).kept.length;
+  return filterTracks(
+    state.track.units,
+    threshold,
+    state.track.clip,
+    new Set(state.track.rejected),
+    new Set(state.track.faces),
+  ).kept.length;
 }
 
 /** Only one task may seek the shared video element at a time. */
@@ -137,6 +156,7 @@ async function countFrameGroup(group: CountGroup, ctx: CountContext, why?: strin
   form.append("productIndex", String(group.members[0] ?? -1));
   form.append("frameIndex", String(frame.index));
   const found = await postForm<CountResult>("/api/scan/count", form);
+  const faces = [...topFaces(found.detections)];
 
   // Muse Spark checks every unit, even with one product of this shape: it rejects lookalikes from other
   // stalls or storage that the size filter cannot tell apart. With several products it also sorts them.
@@ -165,6 +185,7 @@ async function countFrameGroup(group: CountGroup, ctx: CountContext, why?: strin
       method: "frame",
       result: { ...found, productIndex: member, detections },
       rejected,
+      faces,
       sharing: { products: group.candidates.length, groupFound: found.detections.length, sortMs, sortError },
       why,
     };
@@ -219,7 +240,9 @@ export async function countShape(shape: ShapeGroup, ctx: CountContext): Promise<
     }
   }
 
-  const units = summarizeTracks(splitJumps(tracked.tracks, clip));
+  const split = splitJumps(tracked.tracks, clip);
+  const units = summarizeTracks(split);
+  const faces = [...faceTracks(split)];
   const tiles: Record<string, string> = {};
   const tileList: Tile[] = [];
   await withVideo(async () => {
@@ -259,7 +282,7 @@ export async function countShape(shape: ShapeGroup, ctx: CountContext): Promise<
     const mine = single || sortError ? units : units.filter((_, k) => byLabel[String(k + 1)] === candidate);
     const rejected =
       single && !sortError ? units.filter((_, k) => byLabel[String(k + 1)] !== candidate).map((u) => u.id) : [];
-    updates[candidate] = { state: "done", method: "track", track: { ...base, units: mine, rejected }, sharing };
+    updates[candidate] = { state: "done", method: "track", track: { ...base, units: mine, rejected, faces }, sharing };
   }
   return updates;
 }
@@ -306,7 +329,8 @@ async function countAcrossFrames(
           byId = null;
         }
       }
-      return { frame, detections: found.detections.filter((d) => kept.has(d.id)), byId, ms };
+      const detections = found.detections.filter((d) => kept.has(d.id));
+      return { frame, detections, faces: [...topFaces(detections)], byId, ms };
     }),
   );
 
@@ -324,6 +348,7 @@ async function countAcrossFrames(
         scale: p.frame.width / clip.width,
         detections: mine,
         rejected: p.byId ? mine.filter((d) => p.byId?.get(d.id) !== candidate).map((d) => d.id) : [],
+        faces: p.faces,
       };
     });
     const clusters = clusterAcrossFrames(inputs, offsets);
@@ -331,7 +356,9 @@ async function countAcrossFrames(
     const fullest = Math.max(
       0,
       ...inputs.map(
-        (input) => filterDetections(input.detections, 0.5, { rejected: new Set(input.rejected) }).kept.length,
+        (input) =>
+          filterDetections(input.detections, 0.5, { rejected: new Set(input.rejected), faces: new Set(input.faces) })
+            .kept.length,
       ),
     );
     if (!panPlausible(filterPanClusters(clusters, 0.5).kept.length, fullest, cover)) return null;

@@ -67,6 +67,8 @@ export interface KeyframeDetections {
   detections: readonly Detection[];
   /** Detection ids Muse Spark said are not this product. */
   rejected: readonly string[];
+  /** Detection ids that are the top of another unit in the same keyframe. */
+  faces?: readonly string[];
 }
 
 export interface PanMember {
@@ -78,6 +80,7 @@ export interface PanMember {
   map: Detection["box"];
   confidence: number | null;
   rejected: boolean;
+  face: boolean;
 }
 
 /** One physical unit: its sightings in different keyframes. */
@@ -112,6 +115,7 @@ export function clusterAcrossFrames(inputs: readonly KeyframeDetections[], offse
   for (const input of inputs) {
     const offset = offsets[Math.min(Math.max(0, input.clipFrame), offsets.length - 1)] ?? { dx: 0, dy: 0 };
     const rejected = new Set(input.rejected);
+    const faces = new Set(input.faces ?? []);
     for (const d of input.detections) {
       const s = input.scale || 1;
       members.push({
@@ -126,6 +130,7 @@ export function clusterAcrossFrames(inputs: readonly KeyframeDetections[], offse
         },
         confidence: d.confidence,
         rejected: rejected.has(d.id),
+        face: faces.has(d.id),
       });
     }
   }
@@ -183,7 +188,8 @@ export function filterPanClusters(clusters: readonly PanCluster[], threshold: nu
   const dropped: FilteredClusters["dropped"] = [];
   const candidates: PanCluster[] = [];
   for (const c of clusters) {
-    if (c.rep.rejected) dropped.push({ cluster: c, reason: "not this product" });
+    if (c.rep.face) dropped.push({ cluster: c, reason: "another side" });
+    else if (c.rep.rejected) dropped.push({ cluster: c, reason: "not this product" });
     else candidates.push(c);
   }
   const byKey = new Map(candidates.map((c) => [c.key, c]));

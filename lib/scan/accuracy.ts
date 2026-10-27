@@ -1,6 +1,7 @@
 import type { Detection } from "./types.ts";
 
 export type DropReason =
+  | "another side"
   | "low confidence"
   | "too small"
   | "too large"
@@ -37,12 +38,13 @@ function containsCenter(outer: Detection, inner: Detection): boolean {
 export function filterDetections(
   detections: readonly Detection[],
   threshold: number,
-  options: { sizeFilter?: boolean; rejected?: ReadonlySet<string> } = {},
+  options: { sizeFilter?: boolean; rejected?: ReadonlySet<string>; faces?: ReadonlySet<string> } = {},
 ): FilteredDetections {
   const dropped: FilteredDetections["dropped"] = [];
   const confident: Detection[] = [];
   for (const d of detections) {
-    if (options.rejected?.has(d.id)) dropped.push({ detection: d, reason: "not this product" });
+    if (options.faces?.has(d.id)) dropped.push({ detection: d, reason: "another side" });
+    else if (options.rejected?.has(d.id)) dropped.push({ detection: d, reason: "not this product" });
     else if (d.confidence !== null && d.confidence < threshold) dropped.push({ detection: d, reason: "low confidence" });
     else confident.push(d);
   }
@@ -76,13 +78,55 @@ export function filterDetections(
   return { kept, dropped };
 }
 
-/** How many units SAM counts after Muse Spark's check and the confidence and size filters. */
+/** How many units SAM counts after Muse Spark's check and the side, confidence and size filters. */
 export function countAtThreshold(
   detections: readonly Detection[],
   threshold: number,
   rejected: ReadonlySet<string> = new Set(),
+  faces: ReadonlySet<string> = new Set(),
 ): number {
-  return filterDetections(detections, threshold, { rejected }).kept.length;
+  return filterDetections(detections, threshold, { rejected, faces }).kept.length;
+}
+
+type Box = Detection["box"];
+
+/**
+ * SAM sometimes outlines a box's top as a separate object from its front: a
+ * thin strip sitting right on top of a taller face. Those strips are the same
+ * unit seen twice. A strip counts as a top when it is much shorter than the
+ * face below it (at most 35% of its height), strip-shaped, mostly covers the
+ * same width, and its bottom edge meets the face's top edge. Each face has at
+ * most one top; the closest strip wins. Strips cut off by the top of the
+ * picture are left alone. Pass every detection of the shape in the frame, so
+ * a strip that was sorted as another product is still caught.
+ */
+export function topFaces(detections: readonly { id: string; box: Box }[]): Set<string> {
+  const pairs: { face: string; strip: string; gap: number }[] = [];
+  for (const strip of detections) {
+    const s = strip.box;
+    const sw = s.right - s.left;
+    const sh = s.bottom - s.top;
+    if (sw <= 0 || sh <= 0 || s.top <= 2 || sh / sw > 0.6) continue;
+    for (const face of detections) {
+      if (face.id === strip.id) continue;
+      const f = face.box;
+      const fh = f.bottom - f.top;
+      if (fh <= 0 || sh > 0.35 * fh || s.top >= f.top) continue;
+      const overlap = Math.min(s.right, f.right) - Math.max(s.left, f.left);
+      if (overlap < 0.6 * sw) continue;
+      if (s.bottom < f.top - 0.15 * fh || s.bottom > f.top + 0.25 * fh) continue;
+      pairs.push({ face: face.id, strip: strip.id, gap: Math.abs(s.bottom - f.top) });
+    }
+  }
+  pairs.sort((a, b) => a.gap - b.gap);
+  const usedFaces = new Set<string>();
+  const tops = new Set<string>();
+  for (const { face, strip } of pairs) {
+    if (usedFaces.has(face) || tops.has(strip)) continue;
+    usedFaces.add(face);
+    tops.add(strip);
+  }
+  return tops;
 }
 
 export interface AccuracyRow {

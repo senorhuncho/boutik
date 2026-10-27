@@ -1,8 +1,9 @@
-import { contactSheet, cropUnit, drawNumberedBoxes, type Tile } from "@/lib/media/annotate";
+import { contactSheet, cropImage, cropUnit, drawNumberedBoxes, type Tile } from "@/lib/media/annotate";
 import type { ExtractedFrame } from "@/lib/media/browser";
 import type { TrackingClip } from "@/lib/media/clip";
 import { countAtThreshold } from "@/lib/scan/accuracy";
 import type { CountGroup, ShapeGroup } from "@/lib/scan/grouping";
+import { cameraOffsets, clusterAcrossFrames, filterPanClusters, type PanCluster } from "@/lib/scan/panorama";
 import { filterTracks, isSaturated, splitJumps, summarizeTracks, type UnitTrack } from "@/lib/scan/tracks";
 import type { CountResult, Product, TrackResult } from "@/lib/scan/types";
 
@@ -28,8 +29,22 @@ export interface TrackedCount {
   ms: number;
 }
 
+/** Counted on every keyframe and matched across the pan with the measured camera movement. */
+export interface PanCount {
+  concept: string;
+  usedFallback: boolean;
+  clusters: PanCluster[];
+  /** Close-up of each unit's clearest sighting, by cluster key. */
+  tiles: Record<string, string>;
+  keyframes: number;
+  /** How far the camera moved across the stall, in clip pixels. */
+  panPx: number;
+  ms: number;
+}
+
 export type CountState =
   | { state: "loading" }
+  | { state: "done"; method: "pan"; pan: PanCount; sharing: Sharing | null }
   | { state: "done"; method: "frame"; result: CountResult; rejected: string[]; sharing: Sharing | null; why?: string }
   | { state: "done"; method: "track"; track: TrackedCount; sharing: Sharing | null }
   | { state: "error"; error: string };
@@ -62,6 +77,7 @@ export async function postForm<T>(url: string, form: FormData): Promise<T> {
 export function samCount(state: CountState | undefined, threshold: number): number | null {
   if (state?.state !== "done") return null;
   if (state.method === "frame") return countAtThreshold(state.result.detections, threshold, new Set(state.rejected));
+  if (state.method === "pan") return filterPanClusters(state.pan.clusters, threshold).kept.length;
   return filterTracks(state.track.units, threshold, state.track.clip, new Set(state.track.rejected)).kept.length;
 }
 
@@ -176,11 +192,16 @@ export async function countShape(shape: ShapeGroup, ctx: CountContext): Promise<
   }
 
   if (isSaturated(tracked)) {
-    return countByFrames(
-      shape,
-      ctx,
-      `More than 16 alike in view, which is SAM's tracking limit, so these were counted on the clearest frame.`,
-    );
+    try {
+      return await countAcrossFrames(shape, ctx, tracked, clip);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "failed";
+      return countByFrames(
+        shape,
+        ctx,
+        `More than 16 alike in view and matching across frames failed (${message}), so these were counted on the clearest frame.`,
+      );
+    }
   }
 
   const units = summarizeTracks(splitJumps(tracked.tracks, clip));
@@ -226,4 +247,100 @@ export async function countShape(shape: ShapeGroup, ctx: CountContext): Promise<
     updates[candidate] = { state: "done", method: "track", track: { ...base, units: mine, rejected }, sharing };
   }
   return updates;
+}
+
+/**
+ * When SAM's tracking is full (16 objects), finds the units on every keyframe
+ * in image mode, has Muse Spark check or sort them, and lines the keyframes up
+ * with the camera movement measured from the objects SAM did track, so a unit
+ * seen in several keyframes counts once.
+ */
+async function countAcrossFrames(
+  shape: ShapeGroup,
+  ctx: CountContext,
+  tracked: TrackResult,
+  clip: TrackingClip,
+): Promise<Record<number, CountState>> {
+  const started = Date.now();
+  const offsets = cameraOffsets(tracked.tracks, tracked.frames, clip);
+  const panPx = Math.round(Math.abs(offsets[offsets.length - 1]?.dx ?? 0));
+
+  const perFrame = await Promise.all(
+    ctx.frames.map(async (frame) => {
+      const form = new FormData();
+      form.append("frame", frame.blob, `frame-${frame.index}.jpg`);
+      form.append("concept", tracked.concept);
+      form.append("frameIndex", String(frame.index));
+      const found = await postForm<CountResult>("/api/scan/count", form);
+      const labelled = [...found.detections]
+        .sort((a, b) => (b.confidence ?? 1) - (a.confidence ?? 1))
+        .slice(0, MAX_SORT_LABELS);
+      const kept = new Set(labelled.map((d) => d.id));
+      let byId: Map<string, number> | null = null;
+      let ms = 0;
+      if (labelled.length > 0) {
+        try {
+          const annotated = await drawNumberedBoxes(frame.blob, labelled);
+          const sorted = await sortUnits(annotated, labelled.length, shape.candidates, ctx.products);
+          ms = sorted.ms;
+          byId = new Map(labelled.map((d, k) => [d.id, sorted.byLabel[String(k + 1)] ?? -1]));
+        } catch {
+          byId = null;
+        }
+      }
+      return { frame, detections: found.detections.filter((d) => kept.has(d.id)), byId, ms };
+    }),
+  );
+
+  const unchecked = perFrame.filter((p) => p.byId === null && p.detections.length > 0).length;
+  const single = shape.candidates.length === 1;
+  const result: Record<number, CountState> = {};
+  const cropJobs = new Map<string, { blob: Blob; box: PanCluster["rep"]["box"] }>();
+
+  for (const candidate of shape.candidates) {
+    const inputs = perFrame.map((p) => {
+      const mine = single || !p.byId ? p.detections : p.detections.filter((d) => [candidate, -1].includes(p.byId?.get(d.id) ?? -1));
+      return {
+        frame: p.frame.index,
+        clipFrame: Math.round(p.frame.time * clip.fps),
+        scale: p.frame.width / clip.width,
+        detections: mine,
+        rejected: p.byId ? mine.filter((d) => p.byId?.get(d.id) !== candidate).map((d) => d.id) : [],
+      };
+    });
+    const clusters = clusterAcrossFrames(inputs, offsets);
+    for (const c of clusters) {
+      const frame = ctx.frames[c.rep.frame];
+      if (frame && !cropJobs.has(c.key)) cropJobs.set(c.key, { blob: frame.blob, box: c.rep.box });
+    }
+    result[candidate] = {
+      state: "done",
+      method: "pan",
+      pan: { concept: tracked.concept, usedFallback: tracked.usedFallback, clusters, tiles: {}, keyframes: perFrame.length, panPx, ms: 0 },
+      sharing: {
+        products: shape.candidates.length,
+        groupFound: clusters.length,
+        sortMs: perFrame.reduce((sum, p) => sum + p.ms, 0) || undefined,
+        sortError: unchecked ? `${unchecked} frame${unchecked === 1 ? "" : "s"} could not be checked` : undefined,
+      },
+    };
+  }
+
+  const tiles: Record<string, string> = {};
+  await Promise.all(
+    [...cropJobs].map(async ([key, job]) => {
+      const blob = await cropImage(job.blob, job.box);
+      const url = URL.createObjectURL(blob);
+      ctx.urls.push(url);
+      tiles[key] = url;
+    }),
+  );
+  const ms = Date.now() - started;
+  for (const state of Object.values(result)) {
+    if (state.state === "done" && state.method === "pan") {
+      state.pan.tiles = tiles;
+      state.pan.ms = ms;
+    }
+  }
+  return result;
 }

@@ -1,0 +1,79 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { cameraOffsets, clusterAcrossFrames, filterPanClusters, type KeyframeDetections } from "../lib/scan/panorama.ts";
+import type { Detection, Track } from "../lib/scan/types.ts";
+
+interface Fixture {
+  clip: { width: number; height: number; fps: number };
+  track: { frames: number; maxPerFrame: number; tracks: Track[] };
+  keyframes: {
+    frame: number;
+    time: number;
+    width: number;
+    detections: { id: string; box: Detection["box"]; confidence: number | null }[];
+    rejected: string[];
+  }[];
+}
+
+const fx = JSON.parse(
+  readFileSync(new URL("./fixtures/pan-two-stalls-bags.json", import.meta.url), "utf8"),
+) as Fixture;
+
+function inputs(f: Fixture): KeyframeDetections[] {
+  return f.keyframes.map((k) => ({
+    frame: k.frame,
+    clipFrame: Math.round(k.time * f.clip.fps),
+    scale: k.width / f.clip.width,
+    detections: k.detections.map((d) => ({ ...d, maskPath: null, maskBounds: null, maskSize: null })),
+    rejected: k.rejected,
+  }));
+}
+
+test("camera movement measured from SAM's 16 tracked objects matches the real pan (real data)", () => {
+  assert.equal(fx.track.maxPerFrame, 16, "tracking was saturated");
+  const offsets = cameraOffsets(fx.track.tracks, fx.track.frames, fx.clip);
+  assert.equal(offsets.length, fx.track.frames);
+  const end = offsets[offsets.length - 1];
+  // The test video pans 1200 px to the right.
+  assert.ok(end && end.dx > 1080 && end.dx < 1260, `measured ${end?.dx}`);
+  assert.ok(end && Math.abs(end.dy) < 40);
+});
+
+test("12 rice bags on two stalls are counted once each when tracking is saturated (real data)", () => {
+  const offsets = cameraOffsets(fx.track.tracks, fx.track.frames, fx.clip);
+  const clusters = clusterAcrossFrames(inputs(fx), offsets);
+  const { kept, dropped } = filterPanClusters(clusters, 0.5);
+  assert.equal(kept.length, 12);
+  assert.ok(dropped.some((d) => d.reason === "not this product"), "background bags rejected by Muse Spark");
+  for (const c of kept) {
+    const frames = c.members.map((m) => m.frame);
+    assert.equal(new Set(frames).size, frames.length, "one unit never takes two sightings from the same keyframe");
+  }
+});
+
+test("without camera movement every keyframe would count the same bags again", () => {
+  const still = Array.from({ length: fx.track.frames }, () => ({ dx: 0, dy: 0 }));
+  const kept = filterPanClusters(clusterAcrossFrames(inputs(fx), still), 0.5).kept.length;
+  assert.notEqual(kept, 12);
+});
+
+test("two sightings in the same keyframe stay two units even when they overlap", () => {
+  const d = (id: string, left: number): Detection => ({
+    id,
+    box: { left, top: 0, right: left + 100, bottom: 100 },
+    confidence: 0.9,
+    maskPath: null,
+    maskBounds: null,
+    maskSize: null,
+  });
+  const clusters = clusterAcrossFrames(
+    [
+      { frame: 0, clipFrame: 0, scale: 1, detections: [d("a", 0), d("b", 30)], rejected: [] },
+      { frame: 1, clipFrame: 0, scale: 1, detections: [d("c", 0)], rejected: [] },
+    ],
+    [{ dx: 0, dy: 0 }],
+  );
+  assert.equal(clusters.length, 2);
+  assert.ok(clusters.every((c) => new Set(c.members.map((m) => m.frame)).size === c.members.length));
+});

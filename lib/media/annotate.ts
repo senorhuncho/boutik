@@ -135,3 +135,26 @@ export async function contactSheet(tiles: readonly Tile[]): Promise<Blob> {
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Could not save the sheet."))), "image/jpeg", 0.88);
   });
 }
+
+/** Crops one unit from a keyframe image, with a little margin. `box` is in the image's pixels. */
+export async function cropImage(image: Blob, box: { left: number; top: number; right: number; bottom: number }): Promise<Blob> {
+  const bitmap = await createImageBitmap(image);
+  const w = box.right - box.left;
+  const h = box.bottom - box.top;
+  const pad = 0.08;
+  const sx = Math.max(0, box.left - w * pad);
+  const sy = Math.max(0, box.top - h * pad);
+  const sw = Math.min(bitmap.width - sx, w * (1 + 2 * pad));
+  const sh = Math.min(bitmap.height - sy, h * (1 + 2 * pad));
+  const k = Math.min(1, TILE_MAX / Math.max(sw, sh));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sw * k));
+  canvas.height = Math.max(1, Math.round(sh * k));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("This browser cannot draw images.");
+  ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Could not save a crop."))), "image/jpeg", 0.88);
+  });
+}

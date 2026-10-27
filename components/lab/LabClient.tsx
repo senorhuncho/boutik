@@ -5,9 +5,10 @@ import { extractAudio, extractKeyframes, loadVideo, type ExtractedAudio, type Ex
 import { encodeTrackingClip, type TrackingClip } from "@/lib/media/clip";
 import { filterDetections, scoreMethods, type AccuracyRow, type DropReason, type MethodScore } from "@/lib/scan/accuracy";
 import { shapeGroups } from "@/lib/scan/grouping";
+import { filterPanClusters } from "@/lib/scan/panorama";
 import { filterTracks } from "@/lib/scan/tracks";
 import type { IdentifyResult, PricesResult, Product } from "@/lib/scan/types";
-import { countShape, postForm, samCount, type CountState, type TrackedCount } from "./counting";
+import { countShape, postForm, samCount, type CountState } from "./counting";
 import { FrameOverlay } from "./FrameOverlay";
 
 type StepKey = "read" | "identify" | "clip" | "prices" | "count";
@@ -308,6 +309,25 @@ export function LabClient() {
       counts: Object.fromEntries(
         Object.entries(counts).map(([k, v]) => {
           if (v.state !== "done") return [k, v];
+          if (v.method === "pan") {
+            const f = filterPanClusters(v.pan.clusters, threshold);
+            const { tiles: _tiles, clusters, ...pan } = v.pan;
+            return [
+              k,
+              {
+                method: "pan",
+                ...pan,
+                sharing: v.sharing,
+                count: f.kept.length,
+                setAside: f.dropped.map((x) => ({ key: x.cluster.key, reason: x.reason })),
+                clusters: clusters.map((c) => ({
+                  key: c.key,
+                  rep: { frame: c.rep.frame, id: c.rep.id, box: c.rep.box, confidence: c.rep.confidence, rejected: c.rep.rejected },
+                  members: c.members.map((m) => ({ frame: m.frame, id: m.id })),
+                })),
+              },
+            ];
+          }
           if (v.method === "track") {
             const f = filterTracks(v.track.units, threshold, v.track.clip, new Set(v.track.rejected));
             const { tiles: _tiles, ...track } = v.track;
@@ -556,22 +576,40 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
     done?.method === "track"
       ? filterTracks(done.track.units, threshold, done.track.clip, new Set(done.track.rejected))
       : null;
+  const panView = done?.method === "pan" ? filterPanClusters(done.pan.clusters, threshold) : null;
   const sam = samCount(count, threshold);
   const real = realCount.trim() === "" ? null : Number(realCount);
-  const concept = done ? (done.method === "frame" ? done.result.concept : done.track.concept) : product.samPrompt;
-  const usedFallback = done ? (done.method === "frame" ? done.result.usedFallback : done.track.usedFallback) : false;
-  const found = done ? (done.method === "frame" ? done.result.detections.length : done.track.units.length) : 0;
-  const ms = done ? (done.method === "frame" ? done.result.ms : done.track.ms) : undefined;
+  const info = !done
+    ? null
+    : done.method === "frame"
+      ? { concept: done.result.concept, usedFallback: done.result.usedFallback, found: done.result.detections.length, ms: done.result.ms, word: "found" }
+      : done.method === "track"
+        ? { concept: done.track.concept, usedFallback: done.track.usedFallback, found: done.track.units.length, ms: done.track.ms, word: "tracked" }
+        : { concept: done.pan.concept, usedFallback: done.pan.usedFallback, found: done.pan.clusters.length, ms: done.pan.ms, word: "seen" };
+  const concept = info?.concept ?? product.samPrompt;
+  const usedFallback = info?.usedFallback ?? false;
   const dropped = frameView
     ? frameView.dropped.map((d) => ({ reason: d.reason }))
     : trackView
       ? trackView.dropped.map((d) => ({ reason: d.reason }))
-      : [];
+      : panView
+        ? panView.dropped.map((d) => ({ reason: d.reason }))
+        : [];
 
   return (
     <article className="overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]">
       {done?.method === "track" && trackView ? (
-        <UnitGrid track={done.track} kept={trackView.kept.map((u) => u.id)} dropped={trackView.dropped} />
+        <UnitGrid
+          tiles={done.track.tiles}
+          kept={trackView.kept.map((u) => u.id)}
+          dropped={trackView.dropped.map((d) => ({ id: d.unit.id, reason: d.reason }))}
+        />
+      ) : done?.method === "pan" && panView ? (
+        <UnitGrid
+          tiles={done.pan.tiles}
+          kept={panView.kept.map((c) => c.key)}
+          dropped={panView.dropped.map((d) => ({ id: d.cluster.key, reason: d.reason }))}
+        />
       ) : frame ? (
         frameView ? (
           <FrameOverlay
@@ -598,7 +636,9 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
               {product.brand ? `${product.brand} · ` : ""}per {product.unit} · SAM looked for “{concept}”
               {done?.method === "track"
                 ? ` through the whole video`
-                : ` in frame #${product.bestFrame}`}
+                : done?.method === "pan"
+                  ? ` on every frame`
+                  : ` in frame #${product.bestFrame}`}
               {usedFallback ? ` (“${product.samPrompt}” found nothing)` : ""}
             </p>
           </div>
@@ -621,7 +661,7 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
               {count?.state === "loading" ? "…" : count?.state === "error" ? "!" : (sam ?? "–")}
             </dd>
             <dd className="text-[11px] text-[var(--color-muted)]">
-              {done ? `of ${found} ${done.method === "track" ? "tracked" : "found"} · ${formatMs(ms)}` : ""}
+              {info ? `of ${info.found} ${info.word} · ${formatMs(info.ms)}` : ""}
             </dd>
           </div>
           <label className="rounded-xl bg-[var(--color-paper)] p-2.5">
@@ -649,6 +689,13 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
           <p className="mt-3 text-sm text-[var(--color-muted)]">
             Each unit was followed through {done.track.clip.frames} frames of the clip and counted once, wherever it
             appeared.
+          </p>
+        ) : null}
+        {done?.method === "pan" ? (
+          <p className="mt-3 text-sm text-[var(--color-muted)]">
+            More than 16 alike in view, which fills SAM&apos;s tracking, so each of the {done.pan.keyframes} frames was
+            counted and the frames were lined up using the camera movement SAM measured ({done.pan.panPx} px). A unit
+            seen in several frames counts once.
           </p>
         ) : null}
         {done?.method === "frame" && done.why ? <p className="mt-3 text-sm text-[var(--color-warn)]">{done.why}</p> : null}
@@ -685,29 +732,29 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
   );
 }
 
-/** Close-ups of every tracked unit: counted ones numbered, set-aside ones greyed with the reason. */
+/** Close-ups of every unit: counted ones numbered, set-aside ones greyed with the reason. */
 function UnitGrid({
-  track,
+  tiles,
   kept,
   dropped,
 }: {
-  track: TrackedCount;
+  tiles: Record<string, string>;
   kept: string[];
-  dropped: { unit: { id: string }; reason: DropReason }[];
+  dropped: { id: string; reason: DropReason }[];
 }) {
-  if (track.units.length === 0) {
+  if (kept.length + dropped.length === 0) {
     return (
       <div className="bg-[var(--color-paper)] px-4 py-6 text-center text-sm text-[var(--color-muted)]">
         SAM found no units of this product in the video.
       </div>
     );
   }
-  const reasons = new Map(dropped.map((d) => [d.unit.id, d.reason]));
-  const order = [...kept, ...dropped.map((d) => d.unit.id)];
+  const reasons = new Map(dropped.map((d) => [d.id, d.reason]));
+  const order = [...kept, ...dropped.map((d) => d.id)];
   return (
     <div className="grid grid-cols-4 gap-1.5 bg-[var(--color-paper)] p-2 sm:grid-cols-6">
       {order.map((id) => {
-        const url = track.tiles[id];
+        const url = tiles[id];
         const reason = reasons.get(id);
         const number = kept.indexOf(id) + 1;
         return (

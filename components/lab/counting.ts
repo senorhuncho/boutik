@@ -86,12 +86,29 @@ export interface CountContext {
   video: HTMLVideoElement | null;
   /** Object URLs created here, so the caller can free them. */
   urls: string[];
+  /** SAM image searches already made in this scan, by frame and word, so no frame is searched twice. */
+  searches?: Map<string, Promise<CountResult>>;
   /**
    * One clearest close-up per product, learned from the first frame sorted
    * (the way a child learns a new thing from one example and then matches to
    * it). Later sorts get them as a reference sheet.
    */
   exemplars?: Map<number, Blob>;
+}
+
+/**
+ * One SAM image search per frame and word per scan. The same frame was being
+ * searched for "package" up to four times (each shape's rescue pass and the
+ * soft-pack ladder), and every search is paid for.
+ */
+function countOnce(ctx: CountContext, key: string, form: FormData): Promise<CountResult> {
+  ctx.searches ??= new Map();
+  const have = ctx.searches.get(key);
+  if (have) return have;
+  const job = postForm<CountResult>("/api/scan/count", form);
+  ctx.searches.set(key, job);
+  job.catch(() => ctx.searches?.delete(key));
+  return job;
 }
 
 /** A sheet of each known product's example close-up, labelled with the product index. */
@@ -269,7 +286,7 @@ async function countFrameGroup(group: CountGroup, ctx: CountContext, why?: strin
   form.append("fallback", group.fallback);
   form.append("productIndex", String(group.members[0] ?? -1));
   form.append("frameIndex", String(frame.index));
-  const found = await postForm<CountResult>("/api/scan/count", form);
+  const found = await countOnce(ctx, `${frame.index}|${group.concept}|${group.fallback}`, form);
   const faces = [...topFaces(found.detections)];
 
   // Muse Spark checks every unit, even with one product of this shape: it rejects lookalikes from other
@@ -602,7 +619,7 @@ async function countAcrossFrames(
       // Every keyframe must look for the same word, or the stall map mixes different finds.
       form.append("exact", "1");
       form.append("frameIndex", String(frame.index));
-      const found = await postForm<CountResult>("/api/scan/count", form);
+      const found = await countOnce(ctx, `${frame.index}|${tracked.concept}|exact`, form);
       const labelled = [...found.detections]
         .sort((a, b) => (b.confidence ?? 1) - (a.confidence ?? 1))
         .slice(0, MAX_SORT_LABELS);

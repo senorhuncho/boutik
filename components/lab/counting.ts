@@ -1,4 +1,4 @@
-import { contactSheet, cropImage, cropUnit, drawNumberedBoxes, type Tile } from "@/lib/media/annotate";
+import { contactSheet, cropImage, cropImages, cropUnit, type Tile } from "@/lib/media/annotate";
 import type { ExtractedFrame } from "@/lib/media/browser";
 import type { TrackingClip } from "@/lib/media/clip";
 import { countAtThreshold, filterDetections, topFaces } from "@/lib/scan/accuracy";
@@ -16,7 +16,7 @@ import {
   type PanCluster,
 } from "@/lib/scan/panorama";
 import { faceTracks, filterTracks, isSaturated, splitJumps, summarizeTracks, type UnitTrack } from "@/lib/scan/tracks";
-import type { CountResult, Product, TrackResult } from "@/lib/scan/types";
+import type { CountResult, Detection, Product, TrackResult } from "@/lib/scan/types";
 
 /** How a product's units were found when it looks like other products. */
 export interface Sharing {
@@ -158,7 +158,41 @@ function sortPool(word: string, candidates: number[], products: Product[]): numb
   return word === GENERIC_SHAPE && products.length > 1 ? products.map((_, i) => i) : candidates;
 }
 
-/** Counts one frame with SAM image mode; look-alikes are sorted on numbered boxes. */
+/** Close-ups per sheet: 5 × 5 tiles keeps each one legible. */
+const SHEET_TILES = 25;
+
+/**
+ * Muse Spark reads close-ups far better than numbered boxes drawn on a photo:
+ * on a small frame the number covers a tin's label, and 11 Broli tins came
+ * back as France Lait and NAN; from close-ups it read 11 Broli. Each unit is
+ * cropped from the keyframe with its outline, 25 to a sheet.
+ */
+async function sortFrameUnits(
+  frame: Blob,
+  detections: readonly Detection[],
+  pool: number[],
+  products: Product[],
+): Promise<{ byId: Map<string, number>; ms: number }> {
+  const crops = await cropImages(frame, detections.map((d) => d.box));
+  const starts: number[] = [];
+  for (let s = 0; s < detections.length; s += SHEET_TILES) starts.push(s);
+  const parts = await Promise.all(
+    starts.map(async (start) => {
+      const part = detections.slice(start, start + SHEET_TILES);
+      const sheet = await contactSheet(part.map((_, k) => ({ label: k + 1, blob: crops[start + k] as Blob, url: "" })));
+      return { part, sorted: await sortUnits(sheet, part.length, pool, products) };
+    }),
+  );
+  const byId = new Map<string, number>();
+  let ms = 0;
+  for (const { part, sorted } of parts) {
+    ms = Math.max(ms, sorted.ms);
+    part.forEach((d, k) => byId.set(d.id, sorted.byLabel[String(k + 1)] ?? -1));
+  }
+  return { byId, ms };
+}
+
+/** Counts one frame with SAM image mode; Muse Spark checks or sorts close-ups of every unit. */
 async function countFrameGroup(group: CountGroup, ctx: CountContext, why?: string): Promise<Record<number, CountState>> {
   const updates: Record<number, CountState> = {};
   const frame = ctx.frames[group.frame] ?? ctx.frames[0];
@@ -186,10 +220,9 @@ async function countFrameGroup(group: CountGroup, ctx: CountContext, why?: strin
   let sortError: string | undefined;
   if (labelled.length > 0) {
     try {
-      const annotated = await drawNumberedBoxes(frame.blob, labelled);
-      const sorted = await sortUnits(annotated, labelled.length, pool, ctx.products);
+      const sorted = await sortFrameUnits(frame.blob, labelled, pool, ctx.products);
       sortMs = sorted.ms;
-      byId = new Map(labelled.map((d, k) => [d.id, sorted.byLabel[String(k + 1)] ?? -1]));
+      byId = sorted.byId;
     } catch (error) {
       sortError = error instanceof Error ? error.message : "Checking failed";
     }
@@ -443,10 +476,9 @@ async function countAcrossFrames(
       let ms = 0;
       if (labelled.length > 0) {
         try {
-          const annotated = await drawNumberedBoxes(frame.blob, labelled);
-          const sorted = await sortUnits(annotated, labelled.length, pool, ctx.products);
+          const sorted = await sortFrameUnits(frame.blob, labelled, pool, ctx.products);
           ms = sorted.ms;
-          byId = new Map(labelled.map((d, k) => [d.id, sorted.byLabel[String(k + 1)] ?? -1]));
+          byId = sorted.byId;
         } catch {
           byId = null;
         }

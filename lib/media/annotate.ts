@@ -1,51 +1,3 @@
-import type { Detection } from "@/lib/scan/types";
-
-/**
- * Draws each detection as a numbered box on the frame, so Muse Spark can say
- * which product every number is. Label n is detections[n - 1]. Browser only.
- */
-export async function drawNumberedBoxes(frame: Blob, detections: readonly Detection[]): Promise<Blob> {
-  const bitmap = await createImageBitmap(frame);
-  const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("This browser cannot draw images.");
-  ctx.drawImage(bitmap, 0, 0);
-  bitmap.close();
-
-  const longSide = Math.max(canvas.width, canvas.height);
-  const line = Math.max(2, Math.round(longSide / 450));
-  ctx.lineWidth = line;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-
-  detections.forEach((d, i) => {
-    const { left, top, right, bottom } = d.box;
-    const w = Math.max(1, right - left);
-    const h = Math.max(1, bottom - top);
-    ctx.strokeStyle = "#ff00aa";
-    ctx.strokeRect(left, top, w, h);
-
-    const label = String(i + 1);
-    const font = Math.round(Math.min(Math.max(14, Math.min(w, h) * 0.32), longSide / 22));
-    ctx.font = `700 ${font}px system-ui, sans-serif`;
-    const padX = font * 0.3;
-    const badgeW = ctx.measureText(label).width + padX * 2;
-    const badgeH = font * 1.25;
-    const cx = left + w / 2;
-    const cy = top + h / 2;
-    ctx.fillStyle = "#ff00aa";
-    ctx.fillRect(cx - badgeW / 2, cy - badgeH / 2, badgeW, badgeH);
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText(label, cx, cy + font * 0.04);
-  });
-
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Could not save the image."))), "image/jpeg", 0.85);
-  });
-}
-
 export interface Tile {
   label: number;
   blob: Blob;
@@ -154,9 +106,28 @@ export async function contactSheet(tiles: readonly Tile[]): Promise<Blob> {
   });
 }
 
+type Box = { left: number; top: number; right: number; bottom: number };
+
 /** Crops one unit from a keyframe image, with a little margin. `box` is in the image's pixels. */
-export async function cropImage(image: Blob, box: { left: number; top: number; right: number; bottom: number }): Promise<Blob> {
+export async function cropImage(image: Blob, box: Box): Promise<Blob> {
+  const [blob] = await cropImages(image, [box]);
+  if (!blob) throw new Error("Could not save a crop.");
+  return blob;
+}
+
+/** Crops several units from one keyframe image, decoding it once. */
+export async function cropImages(image: Blob, boxes: readonly Box[]): Promise<Blob[]> {
   const bitmap = await createImageBitmap(image);
+  try {
+    const out: Blob[] = [];
+    for (const box of boxes) out.push(await cropBitmap(bitmap, box));
+    return out;
+  } finally {
+    bitmap.close();
+  }
+}
+
+async function cropBitmap(bitmap: ImageBitmap, box: Box): Promise<Blob> {
   const w = box.right - box.left;
   const h = box.bottom - box.top;
   const pad = 0.08;
@@ -171,7 +142,6 @@ export async function cropImage(image: Blob, box: { left: number; top: number; r
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("This browser cannot draw images.");
   ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
   outlineUnit(ctx, box.left, box.top, w, h, sx, sy, k);
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Could not save a crop."))), "image/jpeg", 0.88);

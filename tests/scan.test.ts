@@ -384,3 +384,13 @@ test("spots: every frame belongs to one place, unclaimed sightings form one more
   ]);
   assert.deepEqual(products[1]?.spots, [{ frames: [1], estimatedCount: 0 }]);
 });
+
+test("a price too low for a packaged product is kept but marked for checking", () => {
+  const { prices } = normalizePrices(
+    { prices: [{ productIndex: 0, productName: "France Lait", amount: 45, currency: "XAF", per: "tin", quote: "France Lait 4 5", confidence: "high" }, { productIndex: 1, productName: "Molfix", amount: 7000, currency: "XAF", per: "bag", quote: "Molfix 7,000", confidence: "high" }] },
+    2,
+  );
+  assert.equal(prices[0]?.confidence, "low");
+  assert.ok(prices[0]?.needsCheck);
+  assert.equal(prices[1]?.needsCheck, undefined);
+});

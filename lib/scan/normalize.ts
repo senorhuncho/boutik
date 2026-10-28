@@ -159,14 +159,19 @@ export function normalizePrices(
     // An index outside the list means "no product": never clamp it onto a real product.
     const rawIndex = int(item.productIndex, -1, Number.MAX_SAFE_INTEGER, -1);
     const index = rawIndex < productCount ? rawIndex : -1;
+    const currency = oneOf(item.currency, CURRENCY, "XAF");
+    // Nothing packaged sells for under 100 francs; "France Lait 4 5" and "pampers 7 5" are numbers cut short.
+    // The price is kept for the trader to fix, never trusted.
+    const implausible = (currency === "XAF" && amount < 100) || (currency === "NGN" && amount < 20);
     prices.push({
       productIndex: index,
       productName: text(item.productName, 80),
       amount: Math.round(amount * 100) / 100,
-      currency: oneOf(item.currency, CURRENCY, "XAF"),
+      currency,
       per: text(item.per, 30) || "unit",
       quote: text(item.quote, 200),
-      confidence: oneOf(item.confidence, CONFIDENCE, "low"),
+      confidence: implausible ? "low" : oneOf(item.confidence, CONFIDENCE, "low"),
+      needsCheck: implausible ? "too low for a packaged product; probably cut short" : undefined,
     });
     if (prices.length >= 40) break;
   }

@@ -769,6 +769,7 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
               <li key={k} className="text-[var(--color-muted)]">
                 <span className="font-medium text-[var(--color-ink)]">{formatMoney(x.amount, x.currency)}</span> per {x.per}
                 {x.quote ? ` · “${x.quote}”` : ""} · {x.confidence}
+                {x.needsCheck ? <span className="text-[var(--color-warn)]"> · check: {x.needsCheck}</span> : null}
               </li>
             ))}
           </ul>

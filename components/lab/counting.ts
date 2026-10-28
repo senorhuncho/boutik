@@ -124,6 +124,7 @@ async function referenceSheet(ctx: CountContext, pool: readonly number[]): Promi
 async function learnExemplars(
   ctx: CountContext,
   frame: Blob,
+  frameIndex: number,
   detections: readonly Detection[],
   byId: Map<string, number>,
 ): Promise<void> {
@@ -131,6 +132,10 @@ async function learnExemplars(
   for (const d of detections) {
     const p = byId.get(d.id);
     if (p === undefined || p < 0 || ctx.exemplars?.has(p)) continue;
+    // Only from the frame Muse Spark named as this product's best view: a child learns "this is X" from a
+    // labelled example, not from a guess. Six look-alike diaper packs got examples from one frame where most
+    // of them were not even present, and the wrong examples spread the errors.
+    if (ctx.products[p]?.bestFrame !== frameIndex) continue;
     const have = best.get(p);
     if (!have || (d.confidence ?? 0) > (have.confidence ?? 0)) best.set(p, d);
   }
@@ -238,6 +243,7 @@ const SHEET_TILES = 25;
  */
 async function sortFrameUnits(
   frame: Blob,
+  frameIndex: number,
   detections: readonly Detection[],
   pool: number[],
   ctx: CountContext,
@@ -268,7 +274,7 @@ async function sortFrameUnits(
     }
     result = { byId, ms };
   }
-  await learnExemplars(ctx, frame, detections, result.byId).catch(() => undefined);
+  await learnExemplars(ctx, frame, frameIndex, detections, result.byId).catch(() => undefined);
   return result;
 }
 
@@ -300,7 +306,7 @@ async function countFrameGroup(group: CountGroup, ctx: CountContext, why?: strin
   let sortError: string | undefined;
   if (labelled.length > 0) {
     try {
-      const sorted = await sortFrameUnits(frame.blob, labelled, pool, ctx);
+      const sorted = await sortFrameUnits(frame.blob, frame.index, labelled, pool, ctx);
       sortMs = sorted.ms;
       byId = sorted.byId;
     } catch (error) {
@@ -324,20 +330,6 @@ async function countFrameGroup(group: CountGroup, ctx: CountContext, why?: strin
   return updates;
 }
 
-/** The group whose frame is the best view of the most products of this shape; -1 when there is none. */
-function primaryGroup(shape: ShapeGroup, ctx: CountContext): number {
-  let best = -1;
-  let score = 0;
-  shape.byFrame.forEach((g, k) => {
-    const n = g.members.filter((m) => ctx.products[m]?.bestFrame === g.frame).length;
-    if (n > score) {
-      score = n;
-      best = k;
-    }
-  });
-  return best;
-}
-
 /** Frame searches per shape at once; several shapes are counted at the same time. */
 const FRAME_CONCURRENCY = 4;
 
@@ -359,18 +351,18 @@ async function countByFrames(shape: ShapeGroup, ctx: CountContext, why: string):
       parts[k] = Object.fromEntries(group.members.map((m) => [m, { state: "error", error: message } as CountState]));
     }
   };
-  // The frame that is the best view of most of these products is sorted first, alone, so the sorter learns
-  // one example of each product before it sees the harder frames.
-  const first = primaryGroup(shape, ctx);
-  if (first >= 0 && shape.candidates.length > 1) await run(first);
+  // Every frame that is some product's best view is sorted first, so the sorter has learned an example of
+  // each product before it sees the harder frames.
+  const isBest = (k: number) => shape.candidates.some((m) => ctx.products[m]?.bestFrame === (groups[k] as CountGroup).frame);
+  const order = [...groups.keys()].sort((a, b) => Number(isBest(b)) - Number(isBest(a)));
+  const firstWave = shape.candidates.length > 1 ? order.filter(isBest) : [];
+  await Promise.all(firstWave.map(run));
+  const rest = order.filter((k) => !firstWave.includes(k));
   let next = 0;
   const worker = async () => {
-    for (let k = next++; k < groups.length; k = next++) {
-      if (k === first && shape.candidates.length > 1) continue;
-      await run(k);
-    }
+    for (let i = next++; i < rest.length; i = next++) await run(rest[i] as number);
   };
-  await Promise.all(Array.from({ length: Math.min(FRAME_CONCURRENCY, groups.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(FRAME_CONCURRENCY, rest.length) }, worker));
 
   const seen: Record<number, { frame: number; count: number | null; state: CountState }[]> = {};
   parts.forEach((part, k) => {
@@ -536,11 +528,11 @@ async function countShapeOnce(shape: ShapeGroup, ctx: CountContext): Promise<Rec
     }
   }
 
-  // Look-alikes: learn one example of each product from their best frame before sorting the tracked units.
-  if (shape.candidates.length > 1 && !shape.candidates.every((i) => ctx.exemplars?.has(i))) {
-    const k = primaryGroup(shape, ctx);
-    const group = shape.byFrame[k];
-    if (group) await countFrameGroup(group, ctx).catch(() => undefined);
+  // Look-alikes: learn one example of each product from its own best frame before sorting the tracked units.
+  if (shape.candidates.length > 1) {
+    const bestFrames = new Set(shape.candidates.filter((i) => !ctx.exemplars?.has(i)).map((i) => ctx.products[i]?.bestFrame));
+    const groups = shape.byFrame.filter((g) => bestFrames.has(g.frame));
+    await Promise.all(groups.map((g) => countFrameGroup(g, ctx).catch(() => undefined)));
   }
 
   const split = splitJumps(tracked.tracks, clip);
@@ -628,7 +620,7 @@ async function countAcrossFrames(
       let ms = 0;
       if (labelled.length > 0) {
         try {
-          const sorted = await sortFrameUnits(frame.blob, labelled, pool, ctx);
+          const sorted = await sortFrameUnits(frame.blob, frame.index, labelled, pool, ctx);
           ms = sorted.ms;
           byId = sorted.byId;
         } catch {

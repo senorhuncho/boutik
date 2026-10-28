@@ -58,6 +58,8 @@ export interface PriceMatch {
   per: string;
   quote: string;
   confidence: Confidence;
+  /** Why this price must be confirmed before use (an amount that cannot be right). */
+  needsCheck?: string;
 }
 
 export interface Transcript {

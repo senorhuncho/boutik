@@ -394,3 +394,18 @@ test("a price too low for a packaged product is kept but marked for checking", (
   assert.ok(prices[0]?.needsCheck);
   assert.equal(prices[1]?.needsCheck, undefined);
 });
+
+test("a cut-off sliver at the edge of the photo is not a second unit (clothes stall, real boxes)", () => {
+  const d = (id: string, box: Detection["box"], confidence: number): Detection => ({ id, box, confidence, maskPath: null, maskBounds: null, maskSize: null });
+  const frame = { width: 464, height: 832 };
+  // The red tiered skirt: the whole skirt and a 61 px sliver of the next mannequin's skirt at the left edge.
+  const skirt = [d("0", { left: 0, top: 378, right: 61, bottom: 615 }, 0.73), d("1", { left: 48, top: 416, right: 408, bottom: 832 }, 0.94)];
+  const f = filterDetections(skirt, 0.5, { frame });
+  assert.deepEqual(f.kept.map((x) => x.id), ["1"]);
+  assert.equal(f.dropped[0]?.reason, "partly out of view");
+  // Without the frame size nothing changes.
+  assert.equal(filterDetections(skirt, 0.5).kept.length, 2);
+  // Two whole units side by side, one touching the edge but as big as the other: both count.
+  const pair = [d("a", { left: 0, top: 100, right: 200, bottom: 500 }, 0.9), d("b", { left: 220, top: 100, right: 420, bottom: 500 }, 0.9)];
+  assert.equal(filterDetections(pair, 0.5, { frame }).kept.length, 2);
+});

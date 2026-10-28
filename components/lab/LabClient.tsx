@@ -379,6 +379,7 @@ export function LabClient() {
               setAside: filterDetections(v.result.detections, threshold, {
                 rejected: new Set(v.rejected),
                 faces: new Set(v.faces),
+                frame: v.size,
               }).dropped.map((x) => ({
                 id: x.detection.id,
                 reason: x.reason,
@@ -602,6 +603,7 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
       ? filterDetections(done.result.detections, threshold, {
           rejected: new Set(done.rejected),
           faces: new Set(done.faces),
+          frame: done.size,
         })
       : null;
   const trackView =

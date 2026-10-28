@@ -38,15 +38,34 @@ function containsCenter(outer: Detection, inner: Detection): boolean {
 export function filterDetections(
   detections: readonly Detection[],
   threshold: number,
-  options: { sizeFilter?: boolean; rejected?: ReadonlySet<string>; faces?: ReadonlySet<string> } = {},
+  options: {
+    sizeFilter?: boolean;
+    rejected?: ReadonlySet<string>;
+    faces?: ReadonlySet<string>;
+    /** The picture's size: a sliver cut off by its edge that is much smaller than a whole unit is not counted. */
+    frame?: { width: number; height: number };
+  } = {},
 ): FilteredDetections {
   const dropped: FilteredDetections["dropped"] = [];
-  const confident: Detection[] = [];
+  let confident: Detection[] = [];
   for (const d of detections) {
     if (options.faces?.has(d.id)) dropped.push({ detection: d, reason: "another side" });
     else if (options.rejected?.has(d.id)) dropped.push({ detection: d, reason: "not this product" });
     else if (d.confidence !== null && d.confidence < threshold) dropped.push({ detection: d, reason: "low confidence" });
     else confident.push(d);
+  }
+  if (options.frame) {
+    // On a clothes stall the next mannequin's edge, cut off by the picture, was counted as a second piece
+    // four times. Same rule as for tracked units: a cut-off unit well under the smallest whole one is a sliver.
+    const inside = confident.filter((d) => !touchesEdge(d.box, options.frame as { width: number; height: number }));
+    if (inside.length > 0) {
+      const bar = Math.min(...inside.map(area)) * (inside.length >= 3 ? 0.8 : 0.5);
+      confident = confident.filter((d) => {
+        const sliver = touchesEdge(d.box, options.frame as { width: number; height: number }) && area(d) < bar;
+        if (sliver) dropped.push({ detection: d, reason: "partly out of view" });
+        return !sliver;
+      });
+    }
   }
   if (options.sizeFilter === false || confident.length < 3) return { kept: confident, dropped };
 
@@ -78,14 +97,19 @@ export function filterDetections(
   return { kept, dropped };
 }
 
+function touchesEdge(box: Box, frame: { width: number; height: number }, margin = 2): boolean {
+  return box.left <= margin || box.top <= margin || box.right >= frame.width - margin || box.bottom >= frame.height - margin;
+}
+
 /** How many units SAM counts after Muse Spark's check and the side, confidence and size filters. */
 export function countAtThreshold(
   detections: readonly Detection[],
   threshold: number,
   rejected: ReadonlySet<string> = new Set(),
   faces: ReadonlySet<string> = new Set(),
+  frame?: { width: number; height: number },
 ): number {
-  return filterDetections(detections, threshold, { rejected, faces }).kept.length;
+  return filterDetections(detections, threshold, { rejected, faces, frame }).kept.length;
 }
 
 type Box = Detection["box"];

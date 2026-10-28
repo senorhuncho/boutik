@@ -62,6 +62,8 @@ export type CountState =
       state: "done";
       method: "frame";
       result: CountResult;
+      /** The counted photo's size, for the cut-off-sliver rule. */
+      size?: { width: number; height: number };
       rejected: string[];
       /** Detections that are the top of another unit in the frame. */
       faces: string[];
@@ -170,7 +172,7 @@ export function samCount(state: CountState | undefined, threshold: number): numb
   if (state?.state !== "done") return null;
   if (state.method === "frame") {
     return (
-      countAtThreshold(state.result.detections, threshold, new Set(state.rejected), new Set(state.faces)) +
+      countAtThreshold(state.result.detections, threshold, new Set(state.rejected), new Set(state.faces), state.size) +
       (state.elsewhere ?? 0)
     );
   }
@@ -321,6 +323,7 @@ async function countFrameGroup(group: CountGroup, ctx: CountContext, why?: strin
       state: "done",
       method: "frame",
       result: { ...found, productIndex: member, detections },
+      size: { width: frame.width, height: frame.height },
       rejected,
       faces,
       sharing: { products: group.candidates.length, groupFound: found.detections.length, sortMs, sortError },
@@ -500,8 +503,10 @@ async function countShapeOnce(shape: ShapeGroup, ctx: CountContext): Promise<Rec
     try {
       tracked = await postForm<TrackResult>("/api/scan/track", form);
     } catch (error) {
-      // A gateway error with no answer (seen once on a long clip) is worth one more try.
-      if (!(error instanceof Error && /\(50[234]\)/.test(error.message))) throw error;
+      // A gateway error with no answer, or the phone's upload of the clip failing ("Load failed" on iPhone
+      // while other requests run), is worth one more try.
+      const retry = error instanceof Error && (/\(50[234]\)/.test(error.message) || /load failed|network|fetch/i.test(error.message));
+      if (!retry) throw error;
       tracked = await postForm<TrackResult>("/api/scan/track", form);
     }
   } catch (error) {
@@ -647,6 +652,7 @@ async function countAcrossFrames(
         detections: mine,
         rejected: p.byId ? mine.filter((d) => p.byId?.get(d.id) !== candidate).map((d) => d.id) : [],
         faces: p.faces,
+        size: { width: p.frame.width, height: p.frame.height },
       };
     });
     const clusters = clusterAcrossFrames(inputs, offsets);
@@ -655,7 +661,11 @@ async function countAcrossFrames(
       0,
       ...inputs.map(
         (input) =>
-          filterDetections(input.detections, 0.5, { rejected: new Set(input.rejected), faces: new Set(input.faces) })
+          filterDetections(input.detections, 0.5, {
+            rejected: new Set(input.rejected),
+            faces: new Set(input.faces),
+            frame: input.size,
+          })
             .kept.length,
       ),
     );

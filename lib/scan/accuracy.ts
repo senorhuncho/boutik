@@ -58,8 +58,15 @@ export function filterDetections(
     // On a clothes stall the next mannequin's edge, cut off by the picture, was counted as a second piece
     // four times. Same rule as for tracked units: a cut-off unit well under the smallest whole one is a sliver.
     const inside = confident.filter((d) => !touchesEdge(d.box, options.frame as { width: number; height: number }));
-    if (inside.length > 0) {
-      const bar = Math.min(...inside.map(area)) * (inside.length >= 3 ? 0.8 : 0.5);
+    // When even the whole units reach an edge (a skirt running to the bottom of the picture), a sliver is
+    // anything cut off that is under a quarter of the largest unit.
+    const bar =
+      inside.length > 0
+        ? Math.min(...inside.map(area)) * (inside.length >= 3 ? 0.8 : 0.5)
+        : confident.length > 1
+          ? Math.max(...confident.map(area)) * 0.25
+          : 0;
+    if (bar > 0) {
       confident = confident.filter((d) => {
         const sliver = touchesEdge(d.box, options.frame as { width: number; height: number }) && area(d) < bar;
         if (sliver) dropped.push({ detection: d, reason: "partly out of view" });

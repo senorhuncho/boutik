@@ -112,7 +112,7 @@ function outlineUnit(
 }
 
 /** One image with every unit's close-up in a numbered grid, for Muse Spark to sort. */
-export async function contactSheet(tiles: readonly Tile[]): Promise<Blob> {
+export async function contactSheet(tiles: readonly Tile[], prefix = ""): Promise<Blob> {
   const cell = 240;
   const gap = 8;
   const cols = Math.min(5, Math.max(1, Math.ceil(Math.sqrt(tiles.length))));
@@ -138,7 +138,7 @@ export async function contactSheet(tiles: readonly Tile[]): Promise<Blob> {
     ctx.drawImage(bitmap, x + (cell - w) / 2, y + (cell - h) / 2, w, h);
     bitmap.close();
 
-    const label = String(tile.label);
+    const label = `${prefix}${tile.label}`;
     ctx.font = "700 30px system-ui, sans-serif";
     const badgeW = ctx.measureText(label).width + 18;
     ctx.fillStyle = "#ff00aa";
@@ -194,4 +194,32 @@ async function cropBitmap(bitmap: ImageBitmap, box: Box): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Could not save a crop."))), "image/jpeg", 0.88);
   });
+}
+
+const PHOTO_MAX = 480;
+
+/** A product photo for the shop: the unit with a little room around it and no outline. */
+export async function cropPhoto(image: Blob, box: Box): Promise<Blob> {
+  const bitmap = await createImageBitmap(image);
+  try {
+    const w = box.right - box.left;
+    const h = box.bottom - box.top;
+    const pad = 0.1;
+    const sx = Math.max(0, box.left - w * pad);
+    const sy = Math.max(0, box.top - h * pad);
+    const sw = Math.min(bitmap.width - sx, w * (1 + 2 * pad));
+    const sh = Math.min(bitmap.height - sy, h * (1 + 2 * pad));
+    const k = Math.min(1, PHOTO_MAX / Math.max(sw, sh));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(sw * k));
+    canvas.height = Math.max(1, Math.round(sh * k));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("This browser cannot draw images.");
+    ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Could not save a photo."))), "image/jpeg", 0.85);
+    });
+  } finally {
+    bitmap.close();
+  }
 }

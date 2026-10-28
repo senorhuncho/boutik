@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { describeError } from "@/lib/meta/client";
-import { requestHasLabAccess } from "@/lib/lab/access";
+import { describeError } from "../meta/client.ts";
+import { requestHasLabAccess } from "../lab/access.ts";
+import { BadRequest, Locked } from "./errors.ts";
 
 export const LIMITS = {
   maxFrames: 16,
@@ -11,12 +12,11 @@ export const LIMITS = {
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
-export class BadRequest extends Error {}
-export class Locked extends Error {}
+export { BadRequest, Locked };
 
 /** Every scan call spends API credits, so it needs the lab cookie. */
 export function assertLabAccess(request: Request): void {
-  if (!requestHasLabAccess(request)) throw new Locked("Locked. Open /lab and enter the passcode.");
+  if (!requestHasLabAccess(request)) throw new Locked("Enter the invite code first.");
 }
 
 export function jsonError(error: unknown) {

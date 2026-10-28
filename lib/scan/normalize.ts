@@ -80,7 +80,10 @@ export function normalizeIdentify(
     const brandSeen = text(item.brand, 60);
     const marks = strings(item.marks, 8, 60);
     const keywords = strings(item.keywords, 8, 40);
-    const known = resolveCatalog(text(item.known, 60), { name, brand: brandSeen, marks, keywords });
+    const knownRaw = text(item.known, 80);
+    // "shop:<id>" is one of this shop's own remembered products; the catalogue match still runs on the name.
+    const rememberedId = knownRaw.toLowerCase().startsWith("shop:") ? knownRaw.slice(5) : "";
+    const known = resolveCatalog(rememberedId ? "" : knownRaw, { name, brand: brandSeen, marks, keywords });
     const entry = known?.item;
     const unit = text(item.unit, 30) || entry?.unit || "item";
     // What the model said it saw stays; what the catalogue knows fills the gaps: the shape words that
@@ -106,6 +109,7 @@ export function normalizeIdentify(
       countingNotes: text(item.countingNotes, 240),
       keywords: entry ? strings([...keywords, entry.name, ...entry.names], 12, 40) : keywords,
       ...(entry ? { catalogId: entry.id, catalogWhy: known?.why } : {}),
+      ...(rememberedId ? { rememberedId } : {}),
     });
     if (products.length >= 24) break;
   }

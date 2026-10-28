@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-export function Unlock() {
+export function Unlock({ title = "Scan lab" }: { title?: string }) {
   const [passcode, setPasscode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -27,10 +27,10 @@ export function Unlock() {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center px-4">
       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">Boutik</p>
-      <h1 className="mt-1 text-2xl font-semibold tracking-tight">Scan lab</h1>
+      <h1 className="mt-1 text-2xl font-semibold tracking-tight">{title}</h1>
       <form onSubmit={submit} className="mt-6 space-y-3">
         <label className="block text-sm font-medium" htmlFor="passcode">
-          Passcode
+          Invite code
         </label>
         <input
           id="passcode"
@@ -46,7 +46,7 @@ export function Unlock() {
           disabled={busy || passcode.trim() === ""}
           className="w-full rounded-xl bg-[var(--color-ink)] px-5 py-3.5 text-base font-semibold text-[var(--color-paper)] disabled:opacity-40"
         >
-          {busy ? "Checking…" : "Open the lab"}
+          {busy ? "Checking…" : "Continue"}
         </button>
       </form>
     </main>

@@ -37,6 +37,8 @@ export interface Product {
   catalogId?: string;
   /** How it was recognised: chosen from the reference pictures, or matched by name. */
   catalogWhy?: string;
+  /** The shop's own product this was recognised as, from the shop's remembered pictures. */
+  rememberedId?: string;
 }
 
 export interface Spot {

@@ -21,8 +21,11 @@ export interface ExtractedAudio {
 
 const FRAME_MAX_SIDE = 1280;
 const PROBE_SIDE = 192;
-/** All frames go up in one request, and Vercel takes at most 4.5 MB per request. */
-const FRAMES_BUDGET_BYTES = 3_600_000;
+/**
+ * All frames go up in one request with the reference sheets of known goods
+ * (about 0.45 MB), and Vercel takes at most 4.5 MB per request.
+ */
+const FRAMES_BUDGET_BYTES = 3_300_000;
 const JPEG_QUALITIES = [0.85, 0.75, 0.65, 0.55];
 const AUDIO_RATE = 16000;
 /** Same as the longest video the lab accepts, so prices spoken at the end are heard. */

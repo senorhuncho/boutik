@@ -33,6 +33,10 @@ export interface Product {
   countingNotes: string;
   /** Words a trader might say for this product, in any language. */
   keywords: string[];
+  /** The catalogue entry this product was recognised as, when one fits. */
+  catalogId?: string;
+  /** How it was recognised: chosen from the reference pictures, or matched by name. */
+  catalogWhy?: string;
 }
 
 export interface Spot {

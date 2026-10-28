@@ -3,6 +3,8 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { extractAudio, extractKeyframes, loadVideo, type ExtractedAudio, type ExtractedFrame } from "@/lib/media/browser";
 import { encodeTrackingClip, type TrackingClip } from "@/lib/media/clip";
+import { catalogSheets } from "@/lib/catalog/memory";
+import { catalogItem } from "@/lib/catalog/cameroon";
 import { filterDetections, scoreMethods, type AccuracyRow, type DropReason, type MethodScore } from "@/lib/scan/accuracy";
 import { shapeGroups } from "@/lib/scan/grouping";
 import { filterPanClusters } from "@/lib/scan/panorama";
@@ -159,7 +161,7 @@ export function LabClient() {
       form.append("audio", extractedAudio.blob, "audio.wav");
       form.append(
         "products",
-        JSON.stringify(products.map(({ name, brand, unit, keywords }) => ({ name, brand, unit, keywords }))),
+        JSON.stringify(products.map(({ name, brand, unit, keywords, catalogId }) => ({ name, brand, unit, keywords, catalogId }))),
       );
       try {
         const result = await postForm<PricesResult>("/api/scan/prices", form);
@@ -211,6 +213,10 @@ export function LabClient() {
         setStep("identify", { status: "running" });
         const form = new FormData();
         extracted.forEach((f) => form.append("frames", f.blob, `frame-${f.index}.jpg`));
+        // What Boutik already knows: pictures of goods seen on other stalls, so a blurry Nido tin is still Nido.
+        const sheets = await catalogSheets();
+        sheets.forEach((sheet, i) => form.append("references", sheet.blob, `known-${i + 1}.jpg`));
+        form.append("legends", JSON.stringify(sheets.map((sheet) => sheet.legend)));
 
         // While Muse Spark looks at the frames, the phone makes the small clip SAM will track units in.
         const clipStarted = Date.now();
@@ -622,6 +628,7 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
         : { concept: done.pan.concept, usedFallback: done.pan.usedFallback, found: done.pan.clusters.length, ms: done.pan.ms, word: "seen" };
   const concept = info?.concept ?? product.samPrompt;
   const usedFallback = info?.usedFallback ?? false;
+  const known = catalogItem(product.catalogId ?? "");
   const dropped = frameView
     ? frameView.dropped.map((d) => ({ reason: d.reason }))
     : trackView
@@ -675,6 +682,13 @@ function ProductCard({ index, product, frame, count, threshold, prices, realCoun
                   : ` in frame #${shownFrame(count, product.bestFrame)}`}
               {usedFallback ? ` (“${product.samPrompt}” found too few)` : ""}
             </p>
+            {known ? (
+              <p className="mt-1 text-sm text-[var(--color-muted)]">
+                Known as <span className="font-medium text-[var(--color-ink)]">{known.name}</span>
+                {product.catalogWhy ? ` (${product.catalogWhy})` : ""}
+                {known.countNotes ? ` · ${known.countNotes}` : ""}
+              </p>
+            ) : null}
           </div>
           {prices[0] ? (
             <span className="shrink-0 rounded-full bg-[var(--color-accent-soft)] px-3 py-1 text-sm font-semibold text-[var(--color-accent)]">

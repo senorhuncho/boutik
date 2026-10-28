@@ -1,4 +1,6 @@
 import { contactSheet, cropImage, cropImages, cropUnit, drawNumberedBoxes, type Tile } from "@/lib/media/annotate";
+import { catalogExemplar } from "@/lib/catalog/memory";
+import { catalogItem } from "@/lib/catalog/cameroon";
 import type { ExtractedFrame } from "@/lib/media/browser";
 import type { TrackingClip } from "@/lib/media/clip";
 import { countAtThreshold, filterDetections, topFaces } from "@/lib/scan/accuracy";
@@ -96,6 +98,8 @@ export interface CountContext {
    * it). Later sorts get them as a reference sheet.
    */
   exemplars?: Map<number, Blob>;
+  /** Pictures remembered from other stalls, by catalogue id. */
+  remembered?: Map<string, Promise<Blob | null>>;
 }
 
 /**
@@ -113,13 +117,31 @@ function countOnce(ctx: CountContext, key: string, form: FormData): Promise<Coun
   return job;
 }
 
-/** A sheet of each known product's example close-up, labelled with the product index. */
+/**
+ * A sheet of each product's example close-up, labelled with the product
+ * index: the clearest unit learned from this scan, or, for a product Boutik
+ * recognised as a known good, the picture it remembers from another stall.
+ */
 async function referenceSheet(ctx: CountContext, pool: readonly number[]): Promise<Blob | null> {
-  const tiles = pool
-    .filter((i) => ctx.exemplars?.has(i))
-    .map((i) => ({ label: i, blob: ctx.exemplars?.get(i) as Blob, url: "" }));
+  const tiles: { label: number; blob: Blob; url: string }[] = [];
+  for (const i of pool) {
+    const learned = ctx.exemplars?.get(i);
+    const blob = learned ?? (await rememberedExemplar(ctx, i));
+    if (blob) tiles.push({ label: i, blob, url: "" });
+  }
   if (tiles.length === 0) return null;
   return contactSheet(tiles);
+}
+
+async function rememberedExemplar(ctx: CountContext, index: number): Promise<Blob | null> {
+  const id = ctx.products[index]?.catalogId;
+  if (!id) return null;
+  ctx.remembered ??= new Map();
+  const have = ctx.remembered.get(id);
+  if (have) return have;
+  const job = catalogExemplar(id);
+  ctx.remembered.set(id, job);
+  return job;
 }
 
 /** Remembers the clearest unit of each product from a sorted frame, once per product. */
@@ -205,13 +227,18 @@ async function sortUnits(
   form.append("image", image, "units.jpg");
   if (references) form.append("references", references, "references.jpg");
   form.append("labels", String(labels));
-  const describe = (i: number) => ({
-    index: i,
-    name: products[i]?.name,
-    brand: products[i]?.brand,
-    appearance: products[i]?.appearance,
-    marks: products[i]?.marks ?? [],
-  });
+  // What the catalogue knows about telling this product from its look-alikes goes with its appearance.
+  const describe = (i: number) => {
+    const known = catalogItem(products[i]?.catalogId ?? "");
+    const tip = known?.tellApart ? ` ${known.tellApart}` : "";
+    return {
+      index: i,
+      name: products[i]?.name,
+      brand: products[i]?.brand,
+      appearance: `${products[i]?.appearance ?? ""}${tip}`.trim().slice(0, 300),
+      marks: products[i]?.marks ?? [],
+    };
+  };
   form.append("products", JSON.stringify(candidates.map(describe)));
   // The rest of the scan, so Muse Spark knows what a unit may be instead: checking "custard tub" alone, it
   // accepted 20 Broli tins as custard.

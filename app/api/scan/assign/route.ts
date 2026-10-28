@@ -39,7 +39,7 @@ export async function POST(request: Request) {
         index,
         name: String(item.name ?? "").slice(0, 80),
         brand: String(item.brand ?? "").slice(0, 60),
-        appearance: String(item.appearance ?? "").slice(0, 160),
+        appearance: String(item.appearance ?? "").slice(0, 300),
         marks: marksOf(item),
       };
     });
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
       return {
         name: String(item.name ?? "").slice(0, 80),
         brand: String(item.brand ?? "").slice(0, 60),
-        appearance: String(item.appearance ?? "").slice(0, 160),
+        appearance: String(item.appearance ?? "").slice(0, 300),
         marks: marksOf(item),
       };
     });

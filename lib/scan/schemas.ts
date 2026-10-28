@@ -40,6 +40,7 @@ export const identifySchema = {
           "spots",
           "countingNotes",
           "keywords",
+          "known",
         ],
         properties: {
           name: { type: "string" },
@@ -67,6 +68,7 @@ export const identifySchema = {
           },
           countingNotes: { type: "string" },
           keywords: { type: "array", items: { type: "string" } },
+          known: { type: "string" },
         },
       },
     },

@@ -3,6 +3,7 @@ import { MODELS, meta } from "./client";
 import { assignSchema, identifySchema, pricesSchema } from "@/lib/scan/schemas";
 import { NO_SPEECH, isNoSpeech, normalizeAssignments, normalizeIdentify, normalizePrices } from "@/lib/scan/normalize";
 import type { PriceMatch, Product, StallSummary, Transcript } from "@/lib/scan/types";
+import { knownGoodsText } from "@/lib/catalog/match";
 
 type Part = OpenAI.Chat.Completions.ChatCompletionContentPart;
 
@@ -61,6 +62,18 @@ For each product:
 - countingNotes: one short sentence on anything that makes counting hard.
 - keywords: up to 6 words a trader might say aloud for this product, in English, French or Pidgin
   (for example "riz", "rice", "Uncle Ben's").
+- known: the id of the KNOWN GOOD this product is, or "" when it is none of them.
+
+KNOWN GOODS. Below is a list of goods usually sold in shops here, each with an id, and after the frames you
+may get reference sheets: real photos of some of these goods cut from other stalls, each tile labelled K1,
+K2… with a legend saying which id each tile shows. Use them the way a shopkeeper uses experience: when a
+product on this stall is the same thing as a tile or a listed good (same pack design, same printed words or
+logo, even when the name is too blurry to read on this stall), give its id in "known", take the name and
+brand from it, and still describe what you see on THIS stall (size, count, frames). A tile shows a product
+of the same kind but a different brand or design: it is NOT that known good; leave known "" or pick the
+generic entry (for example "diapers", "vegetable-oil"). The known goods are a memory, not a list of what is
+here: never list a known good that is not visible in the frames, and list every product you see whether or
+not it is known.
 
 Also describe the stall in one sentence, rate image quality, and list problems with the footage
 (blur, darkness, glare, too fast). Return only products you can actually see.`;
@@ -111,8 +124,15 @@ function parseJson(content: string | null | undefined): unknown {
   }
 }
 
+export interface ReferenceSheet {
+  dataUrl: string;
+  /** Tile label (without the K) to the id and name it shows. */
+  legend: { tile: number; id: string; name: string }[];
+}
+
 export async function identifyProducts(
   frames: { dataUrl: string }[],
+  references: ReferenceSheet[] = [],
 ): Promise<{ stall: StallSummary; products: Product[]; model: string }> {
   const content: Part[] = [
     { type: "text", text: `${frames.length} frames follow, numbered from 0.` },
@@ -121,11 +141,19 @@ export async function identifyProducts(
     content.push({ type: "text", text: `Frame ${index}` });
     content.push({ type: "image_url", image_url: { url: frame.dataUrl } });
   });
+  references.forEach((sheet, index) => {
+    const legend = sheet.legend.map((t) => `K${t.tile} = ${t.id} (${t.name})`).join("; ");
+    content.push({
+      type: "text",
+      text: `Reference sheet ${index + 1} (pictures of known goods from OTHER stalls, not this one). Legend: ${legend}`,
+    });
+    content.push({ type: "image_url", image_url: { url: sheet.dataUrl } });
+  });
 
   const completion = await meta().chat.completions.create({
     model: MODELS.vision,
     messages: [
-      { role: "system", content: IDENTIFY_INSTRUCTIONS },
+      { role: "system", content: `${IDENTIFY_INSTRUCTIONS}\n\nList of known goods (id: name (brand); marks; shape):\n${knownGoodsText()}` },
       { role: "user", content },
     ],
     response_format: jsonFormat("stall_inventory", identifySchema),
@@ -192,7 +220,7 @@ async function listenWithSpark(wavBase64: string): Promise<Transcript> {
 }
 
 export async function extractPrices(
-  products: Pick<Product, "name" | "brand" | "unit" | "keywords">[],
+  products: Pick<Product, "name" | "brand" | "unit" | "keywords" | "catalogId">[],
   transcripts: Transcript[],
 ): Promise<{ prices: PriceMatch[]; otherMentions: string[]; model: string }> {
   const usable = transcripts.filter((t) => t.text.trim().length > 0);
@@ -224,7 +252,7 @@ export async function extractPrices(
   });
 
   const raw = parseJson(completion.choices[0]?.message.content);
-  return { ...normalizePrices(raw, products.length), model: MODELS.vision };
+  return { ...normalizePrices(raw, products.length, products.map((p) => p.catalogId)), model: MODELS.vision };
 }
 
 const ASSIGN_INSTRUCTIONS = `An object detector found units on a market stall. Each unit carries a number: either a numbered box

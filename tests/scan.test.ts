@@ -52,18 +52,21 @@ test("normalizeIdentify clamps values and drops junk", () => {
   const [rice, oil] = products;
   assert.equal(rice?.estimatedCount, 13);
   assert.equal(rice?.bestFrame, 5, "frame index clamped to last frame");
-  assert.equal(rice?.samPrompt, "bag of rice");
-  assert.equal(rice?.samFallback, "sack");
+  assert.equal(rice?.catalogId, "rice-bag", "recognised as the catalogue's rice");
+  assert.equal(rice?.samPrompt, "sack", "the catalogue's proven shape word comes first");
+  assert.equal(rice?.samFallback, "bag of rice", "the model's own word is the fallback");
   assert.equal(rice?.appearance, "white sack, green label");
   assert.equal(products[1]?.appearance, "", "missing appearance becomes empty");
-  assert.deepEqual(rice?.keywords, ["riz", "rice"]);
-  assert.equal(oil?.unit, "item");
-  assert.equal(oil?.samPrompt, "item");
-  assert.equal(oil?.samFallback, "item", "missing fallback falls back to the unit");
+  assert.deepEqual(rice?.keywords.slice(0, 2), ["riz", "rice"], "duplicates dropped, case ignored");
+  assert.ok(rice?.keywords.includes("sac de riz"), "spoken names come from the catalogue");
+  assert.equal(oil?.catalogId, "vegetable-oil");
+  assert.equal(oil?.unit, "bottle", "a known good's selling unit fills a missing one");
+  assert.equal(oil?.samPrompt, "bottle");
+  assert.equal(oil?.samFallback, "jerrycan");
   assert.equal(oil?.estimatedCount, 0);
   assert.equal(oil?.bestFrame, 0);
   assert.equal(oil?.countConfidence, "low");
-  assert.deepEqual(oil?.keywords, []);
+  assert.ok(oil?.keywords.includes("huile"), "spoken names come from the known good");
 });
 
 test("normalizeIdentify survives garbage", () => {

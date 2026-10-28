@@ -8,7 +8,7 @@ import type { PricesResult, Product } from "@/lib/scan/types";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-type ProductInput = Pick<Product, "name" | "brand" | "unit" | "keywords">;
+type ProductInput = Pick<Product, "name" | "brand" | "unit" | "keywords" | "catalogId">;
 
 /**
  * Audio from the stall video in, prices matched to products out.
@@ -32,7 +32,8 @@ export async function POST(request: Request) {
         name: String(item.name ?? "").slice(0, 80),
         brand: String(item.brand ?? "").slice(0, 60),
         unit: String(item.unit ?? "").slice(0, 30),
-        keywords: Array.isArray(item.keywords) ? item.keywords.map(String).slice(0, 8) : [],
+        keywords: Array.isArray(item.keywords) ? item.keywords.map(String).slice(0, 12) : [],
+        catalogId: typeof item.catalogId === "string" ? item.catalogId.slice(0, 60) : undefined,
       };
     });
 

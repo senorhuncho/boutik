@@ -1,4 +1,6 @@
 import type { Confidence, PriceMatch, Product, Spot, StallSummary } from "./types.ts";
+import { catalogItem } from "../catalog/cameroon.ts";
+import { priceCheck, resolveCatalog } from "../catalog/match.ts";
 
 /**
  * Structured output guarantees the shape, not sensible values. These helpers
@@ -74,26 +76,36 @@ export function normalizeIdentify(
     const name = text(item.name, 80);
     if (!name || seenNames.has(name.toLowerCase())) continue;
     seenNames.add(name.toLowerCase());
-    const unit = text(item.unit, 30) || "item";
     const bestFrame = int(item.bestFrame, 0, lastFrame, 0);
+    const brandSeen = text(item.brand, 60);
+    const marks = strings(item.marks, 8, 60);
+    const keywords = strings(item.keywords, 8, 40);
+    const known = resolveCatalog(text(item.known, 60), { name, brand: brandSeen, marks, keywords });
+    const entry = known?.item;
+    const unit = text(item.unit, 30) || entry?.unit || "item";
+    // What the model said it saw stays; what the catalogue knows fills the gaps: the shape words that
+    // the detector understands, the maker when the pack is a known brand's, the spoken names.
+    const samPrompt = cleanSamPrompt(item.samPrompt, unit);
+    const samFallback = cleanSamPrompt(item.samFallback, unit);
     const seenIn = Array.isArray(item.seenIn)
       ? item.seenIn.filter((f): f is number => Number.isInteger(f) && f >= 0 && f <= lastFrame)
       : [];
     products.push({
       name,
-      brand: text(item.brand, 60),
+      brand: brandSeen || entry?.brand || "",
       appearance: text(item.appearance, 160),
-      samPrompt: cleanSamPrompt(item.samPrompt, unit),
-      samFallback: cleanSamPrompt(item.samFallback, unit),
+      samPrompt: entry ? entry.shape : samPrompt,
+      samFallback: entry ? (samPrompt !== entry.shape ? samPrompt : entry.fallback) : samFallback,
       unit,
       estimatedCount: int(item.estimatedCount, 0, 5000, 0),
       countConfidence: oneOf(item.countConfidence, CONFIDENCE, "low"),
       bestFrame,
       seenIn: [...new Set([...seenIn, bestFrame])].sort((a, b) => a - b),
-      marks: strings(item.marks, 8, 60),
+      marks,
       spots: normalizeSpots(item.spots, [...new Set([...seenIn, bestFrame])], lastFrame),
       countingNotes: text(item.countingNotes, 240),
-      keywords: strings(item.keywords, 8, 40),
+      keywords: entry ? strings([...keywords, entry.name, ...entry.names], 12, 40) : keywords,
+      ...(entry ? { catalogId: entry.id, catalogWhy: known?.why } : {}),
     });
     if (products.length >= 24) break;
   }
@@ -148,6 +160,7 @@ function dropUnmatchedDuplicates(prices: PriceMatch[]): PriceMatch[] {
 export function normalizePrices(
   raw: unknown,
   productCount: number,
+  catalogIds: readonly (string | undefined)[] = [],
 ): { prices: PriceMatch[]; otherMentions: string[] } {
   const root = isObject(raw) ? raw : {};
   const prices: PriceMatch[] = [];
@@ -163,15 +176,19 @@ export function normalizePrices(
     // Nothing packaged sells for under 100 francs; "France Lait 4 5" and "pampers 7 5" are numbers cut short.
     // The price is kept for the trader to fix, never trusted.
     const implausible = (currency === "XAF" && amount < 100) || (currency === "NGN" && amount < 20);
+    const per = text(item.per, 30) || "unit";
+    const entry = index >= 0 ? catalogItem(catalogIds[index] ?? "") : undefined;
+    const offRange = !implausible && entry ? priceCheck(entry, amount, currency, per) : null;
+    const needsCheck = implausible ? "too low for a packaged product; probably cut short" : offRange ?? undefined;
     prices.push({
       productIndex: index,
       productName: text(item.productName, 80),
       amount: Math.round(amount * 100) / 100,
       currency,
-      per: text(item.per, 30) || "unit",
+      per,
       quote: text(item.quote, 200),
-      confidence: implausible ? "low" : oneOf(item.confidence, CONFIDENCE, "low"),
-      needsCheck: implausible ? "too low for a packaged product; probably cut short" : undefined,
+      confidence: needsCheck ? "low" : oneOf(item.confidence, CONFIDENCE, "low"),
+      needsCheck,
     });
     if (prices.length >= 40) break;
   }

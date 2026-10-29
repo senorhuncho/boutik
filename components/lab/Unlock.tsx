@@ -25,9 +25,10 @@ export function Unlock({ title = "Scan lab" }: { title?: string }) {
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center px-4">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">Boutik</p>
-      <h1 className="mt-1 text-2xl font-semibold tracking-tight">{title}</h1>
+    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center px-5">
+      <p className="text-[14px] font-bold text-[var(--color-ink)]">Boutik</p>
+      <h1 className="mt-1 text-[28px] font-extrabold">{title}</h1>
+      <p className="mt-2 text-[15px] text-[var(--color-muted)]">Boutik is open to a few shops for now. Enter the code you were given.</p>
       <form onSubmit={submit} className="mt-6 space-y-3">
         <label className="block text-sm font-medium" htmlFor="passcode">
           Invite code
@@ -38,13 +39,13 @@ export function Unlock({ title = "Scan lab" }: { title?: string }) {
           autoComplete="current-password"
           value={passcode}
           onChange={(e) => setPasscode(e.target.value)}
-          className="w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-card)] px-4 py-3.5 text-base outline-none focus:border-[var(--color-ink)]"
+          className="field"
         />
         {error ? <p className="text-sm text-[var(--color-bad)]">{error}</p> : null}
         <button
           type="submit"
           disabled={busy || passcode.trim() === ""}
-          className="w-full rounded-xl bg-[var(--color-ink)] px-5 py-3.5 text-base font-semibold text-[var(--color-paper)] disabled:opacity-40"
+          className="btn btn-ink"
         >
           {busy ? "Checking…" : "Continue"}
         </button>

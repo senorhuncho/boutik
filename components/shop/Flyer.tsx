@@ -46,101 +46,125 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, max: number): stri
   return `${t}…`;
 }
 
+function tag(ctx: CanvasRenderingContext2D, x: number, y: number, text: string, per: string, size: number) {
+  ctx.font = `800 ${size}px Manrope, system-ui, sans-serif`;
+  const tw = ctx.measureText(text).width;
+  ctx.font = `600 ${size * 0.68}px Manrope, system-ui, sans-serif`;
+  const pw = ctx.measureText(per).width;
+  const padX = size * 0.45;
+  const h = size * 1.55;
+  const w = padX + tw + size * 0.2 + pw + padX + size * 0.45;
+  ctx.fillStyle = "#ffc83d";
+  ctx.beginPath();
+  ctx.moveTo(x + 10, y);
+  ctx.lineTo(x + w - size * 0.45, y);
+  ctx.lineTo(x + w, y + h / 2);
+  ctx.lineTo(x + w - size * 0.45, y + h);
+  ctx.lineTo(x + 10, y + h);
+  ctx.arcTo(x, y + h, x, y + h - 10, 10);
+  ctx.lineTo(x, y + 10);
+  ctx.arcTo(x, y, x + 10, y, 10);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "#3b2c00";
+  ctx.textBaseline = "middle";
+  ctx.font = `800 ${size}px Manrope, system-ui, sans-serif`;
+  ctx.fillText(text, x + padX, y + h / 2 + 1);
+  ctx.font = `600 ${size * 0.68}px Manrope, system-ui, sans-serif`;
+  ctx.globalAlpha = 0.8;
+  ctx.fillText(per, x + padX + tw + size * 0.2, y + h / 2 + size * 0.08);
+  ctx.globalAlpha = 1;
+  ctx.textBaseline = "top";
+}
+
 async function draw(canvas: HTMLCanvasElement, shop: PublicShop, products: ProductRow[], url: string): Promise<void> {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   const fr = shop.language === "fr";
   canvas.width = W;
   canvas.height = H;
+  await document.fonts?.load("800 90px Manrope").catch(() => undefined);
 
-  const bg = ctx.createLinearGradient(0, 0, 0, H);
-  bg.addColorStop(0, "#1b1a17");
-  bg.addColorStop(1, "#3a2a1a");
-  ctx.fillStyle = bg;
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = "#c2410c";
-  ctx.fillRect(0, 0, W, 18);
 
-  ctx.fillStyle = "#f7f5f0";
+  // The signboard.
+  const boardH = 360;
+  ctx.fillStyle = "#002f67";
+  ctx.fillRect(0, 0, W, boardH);
+  ctx.fillStyle = "#ffc83d";
+  ctx.fillRect(0, boardH, W, 14);
   ctx.textBaseline = "top";
-  ctx.font = "600 44px system-ui, sans-serif";
-  ctx.fillText(fr ? "EN STOCK AUJOURD’HUI" : "IN STOCK TODAY", 72, 90);
-  // The name fits on one line: smaller letters before an ellipsis.
-  let size = 96;
-  ctx.font = `700 ${size}px system-ui, sans-serif`;
-  while (size > 56 && ctx.measureText(shop.name).width > W - 144) {
+  ctx.fillStyle = "#ffffff";
+  let size = 104;
+  ctx.font = `800 ${size}px Manrope, system-ui, sans-serif`;
+  while (size > 60 && ctx.measureText(shop.name).width > W - 144) {
     size -= 4;
-    ctx.font = `700 ${size}px system-ui, sans-serif`;
+    ctx.font = `800 ${size}px Manrope, system-ui, sans-serif`;
   }
-  ctx.fillText(fitText(ctx, shop.name, W - 144), 72, 150 + (96 - size) / 2);
-  ctx.font = "400 40px system-ui, sans-serif";
-  ctx.fillStyle = "#d9d3c7";
-  ctx.fillText([shop.quarter, shop.city].filter(Boolean).join(", "), 72, 272);
+  ctx.fillText(fitText(ctx, shop.name, W - 144), 72, 96);
+  ctx.font = "500 40px Manrope, system-ui, sans-serif";
+  ctx.fillStyle = "rgba(255,255,255,0.8)";
+  ctx.fillText([shop.quarter, shop.city].filter(Boolean).join(", "), 72, 96 + size + 16);
+  ctx.fillStyle = "#ffc83d";
+  ctx.font = "700 40px Manrope, system-ui, sans-serif";
+  ctx.fillText(fr ? "En rayon aujourd’hui" : "On the shelf today", 72, boardH - 70);
 
+  // Six products, their own photos, a price tag on each.
   const shown = products.filter((p) => p.price !== null).slice(0, 6);
   const cols = 2;
-  const cardW = (W - 144 - 36) / cols;
-  const cardH = 400;
-  const top = 370;
+  const gap = 24;
+  const cardW = (W - 144 - gap) / cols;
+  const photoH = 270;
+  const cardH = photoH + 104;
+  const top = boardH + 14 + 44;
   const images = await Promise.all(shown.map((p) => (p.image_url ? loadImage(p.image_url) : Promise.resolve(null))));
   shown.forEach((p, i) => {
-    const x = 72 + (i % cols) * (cardW + 36);
-    const y = top + Math.floor(i / cols) * (cardH + 36);
-    ctx.fillStyle = "#f7f5f0";
-    roundRect(ctx, x, y, cardW, cardH, 28);
-    ctx.fill();
+    const x = 72 + (i % cols) * (cardW + gap);
+    const y = top + Math.floor(i / cols) * (cardH + gap);
     const img = images[i];
-    const ph = 250;
     ctx.save();
-    roundRect(ctx, x, y, cardW, ph, 28);
+    roundRect(ctx, x, y, cardW, photoH, 24);
     ctx.clip();
-    ctx.fillStyle = "#e4e0d6";
-    ctx.fillRect(x, y, cardW, ph);
+    ctx.fillStyle = "#f3f5f9";
+    ctx.fillRect(x, y, cardW, photoH);
     if (img) {
-      const k = Math.max(cardW / img.width, ph / img.height);
+      const k = Math.max(cardW / img.width, photoH / img.height);
       const w = img.width * k;
       const h = img.height * k;
-      ctx.drawImage(img, x + (cardW - w) / 2, y + (ph - h) / 2, w, h);
+      ctx.drawImage(img, x + (cardW - w) / 2, y + (photoH - h) / 2, w, h);
     }
     ctx.restore();
-    ctx.fillStyle = "#17150f";
-    ctx.font = "600 36px system-ui, sans-serif";
-    ctx.fillText(fitText(ctx, p.name, cardW - 48), x + 24, y + ph + 22);
-    ctx.fillStyle = "#c2410c";
-    ctx.font = "700 44px system-ui, sans-serif";
-    const priceText = money(p.price as number, p.currency);
-    ctx.fillText(priceText, x + 24, y + ph + 76);
-    const priceWidth = ctx.measureText(priceText).width;
-    ctx.fillStyle = "#6b665c";
-    ctx.font = "400 28px system-ui, sans-serif";
-    ctx.fillText(`/ ${p.price_per || p.unit}`, x + 24 + priceWidth + 12, y + ph + 88);
+    tag(ctx, x + 16, y + photoH - 16 - 62, money(p.price as number, p.currency), `/${p.price_per || p.unit}`, 40);
+    ctx.fillStyle = "#101828";
+    ctx.font = "700 34px Manrope, system-ui, sans-serif";
+    ctx.fillText(fitText(ctx, p.name, cardW), x, y + photoH + 18);
+    ctx.fillStyle = "#5b6473";
+    ctx.font = "500 28px Manrope, system-ui, sans-serif";
+    ctx.fillText(p.stock > 0 ? (fr ? `${p.stock} en rayon` : `${p.stock} on the shelf`) : fr ? "Épuisé" : "Sold out", x, y + photoH + 66);
   });
 
-  const footerY = 1725;
-  ctx.fillStyle = "#25D366";
-  roundRect(ctx, 72, footerY, W - 144 - 230, 150, 32);
-  ctx.fill();
+  // The way in: a green band with the link and the QR code.
+  const bandY = H - 230;
+  ctx.fillStyle = "#25d366";
+  ctx.fillRect(0, bandY, W, 230);
   ctx.fillStyle = "#ffffff";
-  ctx.font = "700 44px system-ui, sans-serif";
-  ctx.fillText(fr ? "Commandez sur WhatsApp" : "Order on WhatsApp", 104, footerY + 30);
-  ctx.font = "400 34px system-ui, sans-serif";
-  ctx.fillText(url.replace(/^https?:\/\//, ""), 104, footerY + 90);
-
+  ctx.font = "800 46px Manrope, system-ui, sans-serif";
+  ctx.fillText(fr ? "Commandez sur WhatsApp" : "Order on WhatsApp", 72, bandY + 56);
+  ctx.font = "600 34px Manrope, system-ui, sans-serif";
+  ctx.fillText(url.replace(/^https?:\/\//, ""), 72, bandY + 126);
   try {
-    const qr = await QRCode.toDataURL(url, { margin: 1, width: 200, color: { dark: "#17150f", light: "#f7f5f0" } });
+    const qr = await QRCode.toDataURL(url, { margin: 1, width: 180, color: { dark: "#002f67", light: "#ffffff" } });
     const qrImg = await loadImage(qr);
     if (qrImg) {
-      ctx.fillStyle = "#f7f5f0";
-      roundRect(ctx, W - 72 - 200, footerY - 25, 200, 200, 20);
+      ctx.fillStyle = "#ffffff";
+      roundRect(ctx, W - 72 - 190, bandY + 20, 190, 190, 18);
       ctx.fill();
-      ctx.drawImage(qrImg, W - 72 - 200, footerY - 25, 200, 200);
+      ctx.drawImage(qrImg, W - 72 - 185, bandY + 25, 180, 180);
     }
   } catch {
     // No QR: the link is still printed.
   }
-  ctx.fillStyle = "#a39d90";
-  ctx.font = "400 26px system-ui, sans-serif";
-  ctx.fillText("boutik", 72, H - 38);
 }
 
 export function Flyer({ shop, products }: { shop: PublicShop; products: ProductRow[] }) {
@@ -183,16 +207,15 @@ export function Flyer({ shop, products }: { shop: PublicShop; products: ProductR
 
   return (
     <main className="mx-auto w-full max-w-md px-4 pb-24 pt-6">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">Boutik</p>
-      <h1 className="mt-1 text-2xl font-semibold tracking-tight">Flyer for WhatsApp Status</h1>
-      <p className="mt-1 text-sm text-[var(--color-muted)]">Your shop&apos;s own photos and prices. Post it as a Status so customers tap through to order.</p>
-      <canvas ref={canvasRef} className="mt-4 w-full rounded-2xl border border-[var(--color-line)]" aria-label="Flyer preview" />
-      <div className="fixed inset-x-0 bottom-0 border-t border-[var(--color-line)] bg-[var(--color-paper)]/95 p-4 backdrop-blur">
-        <div className="mx-auto flex max-w-md gap-3">
-          <button type="button" disabled={!ready} onClick={() => void blob().then((b) => b && save(b))} className="flex-1 rounded-xl border border-[var(--color-line)] px-4 py-3.5 text-base font-semibold disabled:opacity-50">
+      <h1 className="text-2xl font-extrabold">Your flyer for WhatsApp Status</h1>
+      <p className="mt-1 text-[15px] text-[var(--color-muted)]">Your own photos and prices. Post it as a Status; customers scan or tap through to order.</p>
+      <canvas ref={canvasRef} className="mt-4 w-full rounded-2xl shadow-[0_12px_40px_rgba(0,47,103,0.18)]" aria-label="Flyer preview" />
+      <div className="fixed inset-x-0 bottom-0 bg-white shadow-[0_-8px_30px_rgba(0,47,103,0.12)]">
+        <div className="mx-auto flex max-w-md gap-3 px-4 pb-4 pt-3">
+          <button type="button" disabled={!ready} onClick={() => void blob().then((b) => b && save(b))} className="btn btn-quiet">
             Save image
           </button>
-          <button type="button" disabled={!ready} onClick={() => void share()} className="flex-1 rounded-xl bg-[#25D366] px-4 py-3.5 text-base font-semibold text-white disabled:opacity-50">
+          <button type="button" disabled={!ready} onClick={() => void share()} className="btn btn-whatsapp">
             Share to Status
           </button>
         </div>

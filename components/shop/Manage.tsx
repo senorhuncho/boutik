@@ -70,32 +70,35 @@ export function Manage({ slug }: { slug: string }) {
   }
 
   return (
-    <main className="mx-auto w-full max-w-xl px-4 pb-28 pt-6">
-      <header className="mb-5">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">Boutik</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">{shopName || "Your shop"}</h1>
-        <p className="mt-1 text-sm text-[var(--color-muted)]">
-          <a className="underline" href={`/s/${slug}`}>
-            see the shop
-          </a>
-          {" · "}
-          <a className="underline" href="/scan">
-            scan again
-          </a>
-        </p>
+    <main className="min-h-dvh pb-32">
+      <header className="signboard">
+        <div className="mx-auto max-w-xl px-5 pb-5 pt-7">
+          <p className="text-[14px] font-bold text-[var(--color-accent)]">Stock and prices</p>
+          <h1 className="mt-1 text-[30px] font-extrabold leading-tight text-white">{shopName || "Your shop"}</h1>
+          <p className="mt-2 text-[14px] text-white/75">
+            <a className="font-semibold text-white underline underline-offset-2" href={`/s/${slug}`}>
+              See the shop
+            </a>
+            <span aria-hidden="true"> or </span>
+            <a className="font-semibold text-white underline underline-offset-2" href="/scan">
+              film again
+            </a>
+          </p>
+        </div>
       </header>
-      {error ? <p className="mb-4 rounded-xl bg-red-500/10 p-3 text-sm text-[var(--color-bad)]">{error}</p> : null}
-      <ul className="space-y-2">
+      <div className="mx-auto max-w-xl px-4 pt-4">
+      {error ? <p className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-[var(--color-bad)]">{error}</p> : null}
+      <ul>
         {products.map((p) => (
-          <li key={p.id} className={`flex items-center gap-3 rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] p-3 ${p.published ? "" : "opacity-70"}`}>
-            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-[var(--color-line)]">
+          <li key={p.id} className={`flex items-center gap-3 border-b border-[var(--color-line)] py-3 ${p.published ? "" : "opacity-60"}`}>
+            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-[var(--color-wash)]">
               {p.imageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element -- the trader's own photo
                 <img src={p.imageUrl} alt="" className="h-full w-full object-cover" />
               ) : null}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[15px] font-semibold">{p.name}</p>
+              <p className="truncate text-[15px] font-bold">{p.name}</p>
               <div className="mt-1 flex items-center gap-2 text-sm">
                 <label className="flex items-center gap-1">
                   <span className="text-xs text-[var(--color-muted)]">stock</span>
@@ -105,8 +108,8 @@ export function Manage({ slug }: { slug: string }) {
                   <span className="text-xs text-[var(--color-muted)]">price</span>
                   <input inputMode="numeric" value={p.price ?? ""} onChange={(e) => update(p.id, { price: Number(e.target.value.replace(/[^\d]/g, "")) || null })} className="w-20 rounded-lg border border-[var(--color-line)] bg-transparent px-1 py-1 text-center tabular-nums" />
                 </label>
-                <button type="button" onClick={() => update(p.id, { published: !p.published })} className="ml-auto rounded-full border border-[var(--color-line)] px-3 py-1 text-xs font-medium">
-                  {p.published ? "on shop" : "hidden"}
+                <button type="button" onClick={() => update(p.id, { published: !p.published })} className={`ml-auto rounded-full px-3 py-1 text-xs font-bold ${p.published ? "bg-[var(--color-accent)] text-[var(--color-accent-ink)]" : "bg-[var(--color-wash)] text-[var(--color-muted)]"}`}>
+                  {p.published ? "on the shop" : "hidden"}
                 </button>
               </div>
             </div>
@@ -114,14 +117,15 @@ export function Manage({ slug }: { slug: string }) {
         ))}
       </ul>
       {dirty ? (
-        <div className="fixed inset-x-0 bottom-0 border-t border-[var(--color-line)] bg-[var(--color-paper)]/95 p-4 backdrop-blur">
-          <div className="mx-auto max-w-xl">
-            <button type="button" disabled={busy} onClick={() => void save()} className="w-full rounded-xl bg-[var(--color-ink)] px-5 py-4 text-base font-semibold text-[var(--color-paper)] disabled:opacity-50">
+        <div className="fixed inset-x-0 bottom-0 bg-white shadow-[0_-8px_30px_rgba(0,47,103,0.12)]">
+          <div className="mx-auto max-w-xl px-4 pb-4 pt-3">
+            <button type="button" disabled={busy} onClick={() => void save()} className="btn btn-ink">
               {busy ? "Saving…" : "Save changes"}
             </button>
           </div>
         </div>
       ) : null}
+      </div>
     </main>
   );
 }

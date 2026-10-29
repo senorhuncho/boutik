@@ -222,36 +222,38 @@ export function ScanFlow() {
   const shopUrl = useMemo(() => (shop && typeof window !== "undefined" ? `${window.location.origin}/s/${shop.slug}` : ""), [shop]);
 
   return (
-    <main className="mx-auto w-full max-w-xl px-4 pb-28 pt-6">
-      <header className="mb-5">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">Boutik</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-          {phase === "setup" ? "Open your shop" : shop ? shop.name : "Your shop"}
-        </h1>
-        {shop && phase !== "setup" ? (
-          <p className="mt-1 text-sm text-[var(--color-muted)]">
-            {memory.length ? `${memory.length} products remembered · ` : ""}
-            <a className="underline" href={`/s/${shop.slug}`}>
-              see the shop
-            </a>
-            {" · "}
-            <button
-              type="button"
-              className="underline"
-              onClick={() => {
-                saveOwnedShop(null);
-                setShop(null);
-                setMemory([]);
-                setPhase("setup");
-              }}
-            >
-              not your shop?
-            </button>
-          </p>
-        ) : null}
+    <main className="min-h-dvh pb-32">
+      <header className="signboard">
+        <div className="mx-auto max-w-xl px-5 pb-5 pt-7">
+          <p className="text-[14px] font-bold text-[var(--color-accent)]">Boutik</p>
+          <h1 className="mt-1 text-[30px] font-extrabold leading-tight text-white">
+            {phase === "setup" ? "Open your shop" : shop ? shop.name : "Your shop"}
+          </h1>
+          {shop && phase !== "setup" ? (
+            <p className="mt-2 text-[14px] text-white/75">
+              {memory.length ? `${memory.length} products remembered. ` : ""}
+              <a className="font-semibold text-white underline underline-offset-2" href={`/s/${shop.slug}`}>
+                See the shop
+              </a>
+              <span aria-hidden="true"> or </span>
+              <button
+                type="button"
+                className="font-semibold text-white underline underline-offset-2"
+                onClick={() => {
+                  saveOwnedShop(null);
+                  setShop(null);
+                  setMemory([]);
+                  setPhase("setup");
+                }}
+              >
+                open another shop
+              </button>
+            </p>
+          ) : null}
+        </div>
       </header>
-
-      {error ? <p className="mb-4 rounded-xl bg-red-500/10 p-3 text-sm text-[var(--color-bad)]">{error}</p> : null}
+      <div className="mx-auto max-w-xl px-4 pt-5">
+      {error ? <p className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-[var(--color-bad)]">{error}</p> : null}
 
       {phase === "setup" ? (
         <Setup
@@ -264,13 +266,20 @@ export function ScanFlow() {
       ) : null}
 
       {phase === "film" ? (
-        <section className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] p-5">
-          <h2 className="text-lg font-semibold">Film your shop</h2>
-          <ol className="mt-3 space-y-2 text-[15px] leading-relaxed text-[var(--color-muted)]">
-            <li>1. Stand one big step from the shelf, with the light behind you.</li>
-            <li>2. Move slowly, shelf by shelf, about 5 seconds per shelf. Under 90 seconds in all.</li>
-            <li>3. Say each product and its price out loud as it comes into view: “Nido, trois mille cinq cents”.</li>
-            <li>4. Keep every pack in the picture: a half-seen pack is not counted.</li>
+        <section>
+          <h2 className="text-[22px] font-extrabold">Film your shelves</h2>
+          <ol className="mt-3 space-y-3">
+            {[
+              "Stand one big step from the shelf, with the light behind you.",
+              "Move slowly, shelf by shelf, about 5 seconds per shelf. Under 90 seconds in all.",
+              "Say each product and its price as it comes into view: “Nido, trois mille cinq cents”.",
+              "Keep every pack whole in the picture: a half-seen pack is not counted.",
+            ].map((line, i) => (
+              <li key={line} className="flex gap-3 text-[15px] leading-relaxed">
+                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)] text-[13px] font-extrabold text-[var(--color-accent-ink)]">{i + 1}</span>
+                <span>{line}</span>
+              </li>
+            ))}
           </ol>
           <input
             ref={inputRef}
@@ -285,55 +294,47 @@ export function ScanFlow() {
               e.target.value = "";
             }}
           />
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            className="mt-6 w-full rounded-xl bg-[var(--color-ink)] px-5 py-4 text-base font-semibold text-[var(--color-paper)] active:opacity-80"
-          >
+          <button type="button" onClick={() => inputRef.current?.click()} className="btn btn-ink mt-6">
             Film the shop
           </button>
-          <p className="mt-3 text-center text-xs text-[var(--color-muted)]">
+          <p className="mt-3 text-center text-[13px] text-[var(--color-muted)]">
             The video stays on your phone; only small pictures and the sound go up. Takes 2 to 3 minutes.
           </p>
         </section>
       ) : null}
 
       {phase === "scanning" ? (
-        <section aria-live="polite" className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] p-5">
-          <h2 className="text-lg font-semibold">Looking at your shop…</h2>
+        <section aria-live="polite" className="rounded-2xl bg-[var(--color-wash)] p-5">
+          <h2 className="text-[22px] font-extrabold">Looking at your shelves…</h2>
           <ul className="mt-4 space-y-3">
             {(Object.keys(STEP_WORDS) as StepKey[]).map((key) => (
               <Step key={key} label={STEP_WORDS[key]} state={scan.steps[key]} detail={STEP_LABELS[key]} />
             ))}
           </ul>
           {scan.identify ? (
-            <p className="mt-4 text-sm text-[var(--color-muted)]">
-              Seen so far: {scan.identify.products.map((p) => p.name).join(", ") || "nothing yet"}
+            <p className="mt-4 text-[15px] leading-relaxed">
+              <span className="font-bold text-[var(--color-ink)]">Seen so far: </span>
+              {scan.identify.products.map((p) => p.name).join(", ") || "nothing yet"}
             </p>
           ) : null}
-          <p className="mt-4 text-xs text-[var(--color-muted)]">Keep this page open. You can lower the phone.</p>
+          <p className="mt-4 text-[13px] text-[var(--color-muted)]">Keep this page open. You can put the phone down.</p>
         </section>
       ) : null}
 
       {phase === "confirm" || phase === "saving" ? (
         <section>
-          <h2 className="text-lg font-semibold">Check the list</h2>
-          <p className="mt-1 text-sm text-[var(--color-muted)]">
-            Tap a number to change it. Products without a price stay off the shop until you add one.
+          <h2 className="text-[22px] font-extrabold">Check the list</h2>
+          <p className="mt-1 text-[15px] text-[var(--color-muted)]">
+            Tap a number to change it. A product without a price stays off the shop until you add one.
           </p>
           <ul className="mt-4 space-y-3">
             {rows.map((r) => (
               <ProductRow key={r.key} row={r} onChange={(patch) => update(r.key, patch)} />
             ))}
           </ul>
-          <div className="fixed inset-x-0 bottom-0 border-t border-[var(--color-line)] bg-[var(--color-paper)]/95 p-4 backdrop-blur">
-            <div className="mx-auto max-w-xl">
-              <button
-                type="button"
-                disabled={phase === "saving"}
-                onClick={() => void confirm()}
-                className="w-full rounded-xl bg-[var(--color-ink)] px-5 py-4 text-base font-semibold text-[var(--color-paper)] disabled:opacity-50"
-              >
+          <div className="fixed inset-x-0 bottom-0 bg-white shadow-[0_-8px_30px_rgba(0,47,103,0.12)]">
+            <div className="mx-auto max-w-xl px-4 pb-4 pt-3">
+              <button type="button" disabled={phase === "saving"} onClick={() => void confirm()} className="btn btn-ink">
                 {phase === "saving"
                   ? "Saving…"
                   : `Put ${rows.filter((r) => !r.removed && canPublish({ price: Number(r.priceText) || undefined, needsCheck: [] })).length} products on my shop`}
@@ -344,16 +345,13 @@ export function ScanFlow() {
       ) : null}
 
       {phase === "done" && shop ? (
-        <section className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] p-5">
-          <h2 className="text-lg font-semibold">Your shop is online</h2>
-          <p className="mt-2 text-[15px] text-[var(--color-muted)]">
+        <section>
+          <h2 className="text-[22px] font-extrabold">Your shop is online</h2>
+          <p className="mt-2 text-[15px] leading-relaxed text-[var(--color-muted)]">
             {saved?.published ?? 0} products with prices are on your shop{saved && saved.total > saved.published ? `; ${saved.total - saved.published} wait for a price` : ""}.
             Buyers order on WhatsApp at {shop.whatsapp.replace(/^237/, "+237 ")}.
           </p>
-          <a
-            href={shopUrl}
-            className="mt-5 block w-full rounded-xl border border-[var(--color-line)] px-5 py-4 text-center text-base font-semibold"
-          >
+          <a href={shopUrl} className="mt-5 block rounded-2xl bg-[var(--color-wash)] px-5 py-4 text-center text-[15px] font-bold text-[var(--color-ink)]">
             {shopUrl.replace(/^https?:\/\//, "")}
           </a>
           <a
@@ -362,14 +360,14 @@ export function ScanFlow() {
                 ? `Ma boutique ${shop.name} est en ligne. Commandez ici : ${shopUrl}`
                 : `My shop ${shop.name} is online. Order here: ${shopUrl}`,
             )}`}
-            className="mt-3 block w-full rounded-xl bg-[#25D366] px-5 py-4 text-center text-base font-semibold text-white"
+            className="btn btn-whatsapp mt-3"
           >
-            Share on WhatsApp
+            Share the link on WhatsApp
           </a>
-          <a href={`/s/${shop.slug}/flyer`} className="mt-3 block w-full rounded-xl border border-[var(--color-line)] px-5 py-4 text-center text-base font-semibold">
+          <a href={`/s/${shop.slug}/flyer`} className="btn btn-quiet mt-3">
             Make a flyer for WhatsApp Status
           </a>
-          <a href={`/s/${shop.slug}/manage`} className="mt-3 block w-full rounded-xl border border-[var(--color-line)] px-5 py-4 text-center text-base font-semibold">
+          <a href={`/s/${shop.slug}/manage`} className="btn btn-quiet mt-3">
             Change stock or prices
           </a>
           <button
@@ -381,12 +379,13 @@ export function ScanFlow() {
               setSaved(null);
               setPhase("film");
             }}
-            className="mt-3 w-full rounded-xl px-5 py-3 text-sm font-medium text-[var(--color-muted)]"
+            className="mt-3 w-full px-5 py-3 text-[15px] font-semibold text-[var(--color-muted)]"
           >
-            Scan again
+            Film again
           </button>
         </section>
       ) : null}
+      </div>
     </main>
   );
 }
@@ -428,9 +427,9 @@ function Setup({ onDone }: { onDone: (shop: OwnedShop) => void }) {
     }
   }
 
-  const field = "w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-card)] px-4 py-3.5 text-base outline-none focus:border-[var(--color-ink)]";
+  const field = "field";
   return (
-    <form onSubmit={submit} className="space-y-4 rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] p-5">
+    <form onSubmit={submit} className="space-y-5">
       <div>
         <label className="block text-sm font-medium" htmlFor="shop-name">
           Shop name
@@ -451,7 +450,7 @@ function Setup({ onDone }: { onDone: (shop: OwnedShop) => void }) {
               key={l}
               type="button"
               onClick={() => setLanguage(l)}
-              className={`flex-1 rounded-xl border px-4 py-3 text-base font-medium ${language === l ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-[var(--color-paper)]" : "border-[var(--color-line)]"}`}
+              className={`flex-1 rounded-xl border-[1.5px] px-4 py-3 text-base font-semibold ${language === l ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white" : "border-[var(--color-line)]"}`}
             >
               {l === "fr" ? "Français" : "English"}
             </button>
@@ -462,9 +461,9 @@ function Setup({ onDone }: { onDone: (shop: OwnedShop) => void }) {
       <button
         type="submit"
         disabled={busy || name.trim().length < 2 || whatsapp.replace(/\D/g, "").length < 8}
-        className="w-full rounded-xl bg-[var(--color-ink)] px-5 py-4 text-base font-semibold text-[var(--color-paper)] disabled:opacity-40"
+        className="btn btn-ink"
       >
-        {busy ? "Opening…" : "Continue"}
+        {busy ? "Opening…" : "Continue to filming"}
       </button>
     </form>
   );
@@ -501,7 +500,7 @@ function ProductRow({ row, onChange }: { row: Row; onChange: (patch: Partial<Row
   const flagged = row.needsCheck.filter((n) => n.startsWith("price:"));
   if (row.removed) {
     return (
-      <li className="flex items-center justify-between rounded-2xl border border-dashed border-[var(--color-line)] px-4 py-3 text-sm text-[var(--color-muted)]">
+      <li className="flex items-center justify-between rounded-2xl bg-[var(--color-wash)] px-4 py-3 text-sm text-[var(--color-muted)]">
         <span className="line-through">{row.name}</span>
         <button type="button" className="font-medium underline" onClick={() => onChange({ removed: false })}>
           Put back
@@ -510,9 +509,9 @@ function ProductRow({ row, onChange }: { row: Row; onChange: (patch: Partial<Row
     );
   }
   return (
-    <li className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] p-3">
+    <li className="border-b border-[var(--color-line)] pb-4">
       <div className="flex gap-3">
-        <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-[var(--color-line)]">
+        <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-[var(--color-wash)]">
           {row.imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- photo cut from the trader's own video
             <img src={row.imageUrl} alt="" className="h-full w-full object-cover" />
@@ -524,7 +523,7 @@ function ProductRow({ row, onChange }: { row: Row; onChange: (patch: Partial<Row
           <input
             value={row.name}
             onChange={(e) => onChange({ name: e.target.value })}
-            className="w-full bg-transparent text-[16px] font-semibold leading-snug outline-none"
+            className="w-full bg-transparent text-[16px] font-bold leading-snug outline-none"
             aria-label="Product name"
           />
           <p className="mt-0.5 text-xs text-[var(--color-muted)]">
@@ -550,14 +549,14 @@ function ProductRow({ row, onChange }: { row: Row; onChange: (patch: Partial<Row
         <label className="sr-only" htmlFor={`price-${row.key}`}>
           Price
         </label>
-        <div className="flex flex-1 items-center rounded-xl border border-[var(--color-line)] px-3">
+        <div className="flex flex-1 items-center rounded-xl border-[1.5px] border-[var(--color-line)] px-3 focus-within:border-[var(--color-ink)]">
           <input
             id={`price-${row.key}`}
             inputMode="numeric"
             value={row.priceText}
             onChange={(e) => onChange({ priceText: e.target.value.replace(/[^\d]/g, "") })}
             placeholder="Price"
-            className={`w-full bg-transparent py-3 text-base outline-none ${flagged.length ? "text-[var(--color-warn)]" : ""}`}
+            className={`w-full bg-transparent py-3 text-base font-bold outline-none ${flagged.length ? "text-[var(--color-warn)]" : "text-[var(--color-ink)]"}`}
           />
           <span className="text-sm text-[var(--color-muted)]">FCFA / {row.pricePer || row.unit}</span>
         </div>
@@ -572,14 +571,18 @@ function ProductRow({ row, onChange }: { row: Row; onChange: (patch: Partial<Row
           {row.priceQuote ? ` (you said “${row.priceQuote}”)` : ""}
         </p>
       ) : null}
-      {row.priceText ? <p className="mt-1 text-xs text-[var(--color-muted)]">{formatMoney(Number(row.priceText), row.currency)}</p> : null}
+      {row.priceText ? (
+        <p className="mt-2">
+          <span className="tag text-[14px]">{formatMoney(Number(row.priceText), row.currency)}</span>
+        </p>
+      ) : null}
     </li>
   );
 }
 
 function Stepper({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
-    <div className="flex items-center rounded-xl border border-[var(--color-line)]">
+    <div className="flex items-center rounded-xl border-[1.5px] border-[var(--color-line)]">
       <button type="button" className="px-3 py-2 text-lg leading-none" onClick={() => onChange(Math.max(0, value - 1))} aria-label="One less">
         −
       </button>

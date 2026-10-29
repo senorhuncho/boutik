@@ -1,5 +1,6 @@
 import type { PriceMatch, Product } from "../scan/types.ts";
 import { catalogItem } from "../catalog/cameroon.ts";
+import { matchCatalog } from "../catalog/match.ts";
 
 /**
  * From a finished scan to the list the trader confirms with one tap each.
@@ -76,7 +77,26 @@ function area(b: DraftPicture["box"]): number {
   return Math.max(0, b.right - b.left) * Math.max(0, b.bottom - b.top);
 }
 
-export function draftProducts(scan: ScanLike): DraftProduct[] {
+/** What a shop's past corrections taught about one catalogue entry. */
+export interface CountLesson {
+  scans: number;
+  under: number;
+  over: number;
+  exact: number;
+}
+
+/**
+ * The lesson's verdict on the counter for this product: it usually sees too
+ * few, too many, or is about right. Needs at least two corrections to say.
+ */
+export function lessonVerdict(lesson: CountLesson | undefined): "under" | "over" | null {
+  if (!lesson || lesson.scans < 2) return null;
+  if (lesson.under * 3 >= lesson.scans * 2) return "under";
+  if (lesson.over * 3 >= lesson.scans * 2) return "over";
+  return null;
+}
+
+export function draftProducts(scan: ScanLike, lessons: Record<string, CountLesson> = {}): DraftProduct[] {
   const products = scan.identify?.products ?? [];
   const prices = scan.prices?.prices ?? [];
   const counts = scan.counts ?? {};
@@ -87,7 +107,9 @@ export function draftProducts(scan: ScanLike): DraftProduct[] {
     const counted = count?.state === "done" || (count?.count !== undefined && count?.count !== null && count?.state === undefined);
     const seen = counted && typeof count?.count === "number" ? count.count : null;
     const estimate = Math.max(0, p.estimatedCount);
-    const entry = catalogItem(p.catalogId ?? "");
+    // Scans made before the catalogue, or a product the identifier left unknown, still get matched by name.
+    const catalogId = p.catalogId ?? matchCatalog({ name: p.name, brand: p.brand, marks: p.marks })?.item.id;
+    const entry = catalogItem(catalogId ?? "");
     let stock: number;
     let stockWhy: string;
     if (seen !== null && seen > 0) {
@@ -104,7 +126,17 @@ export function draftProducts(scan: ScanLike): DraftProduct[] {
       stockWhy = "none seen";
     }
     if (entry?.countBy === "heap" && seen !== null && seen > 0) stockWhy = `${seen} heap${seen === 1 ? "" : "s"} seen`;
-    const stockHint = estimate > stock ? estimate : undefined;
+    let stockHint = estimate > stock ? estimate : undefined;
+    // What this shop taught before: when the trader kept raising the camera's count for this product,
+    // start from the higher estimate; when they kept lowering it, keep the count and drop the hint.
+    const verdict = lessonVerdict(lessons[catalogId ?? ""]);
+    if (verdict === "under" && stockHint !== undefined) {
+      stock = stockHint;
+      stockHint = undefined;
+      stockWhy = `${seen ?? 0} seen; you usually have more than the camera sees`;
+    } else if (verdict === "over") {
+      stockHint = undefined;
+    }
     const price = bestPrice(prices, index);
     const needsCheck: string[] = [];
     if (price?.needsCheck) needsCheck.push(`price: ${price.needsCheck}`);
@@ -114,7 +146,7 @@ export function draftProducts(scan: ScanLike): DraftProduct[] {
       name: p.name,
       brand: p.brand,
       unit: p.unit,
-      catalogId: p.catalogId,
+      catalogId,
       rememberedId: p.rememberedId,
       stock,
       stockHint,

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { assertLabAccess, BadRequest, imageFile, parseJsonField, readForm } from "@/lib/scan/http";
 import { manageToken, shopError } from "@/lib/shop/http";
 import { draftProducts } from "@/lib/shop/draft";
-import { ownedShop, saveScan, uploadPicture } from "@/lib/shop/service";
+import { countLessons, ownedShop, saveScan, uploadPicture } from "@/lib/shop/service";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -36,7 +36,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
       stored++;
     }
 
-    const drafts = draftProducts(payload as Parameters<typeof draftProducts>[0]).map((d) => ({
+    const lessons = await countLessons(shop.id).catch(() => ({}));
+    const drafts = draftProducts(payload as Parameters<typeof draftProducts>[0], lessons).map((d) => ({
       ...d,
       imageUrl: d.index >= 0 ? pictures.get(d.index) : undefined,
     }));

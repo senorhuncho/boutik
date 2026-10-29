@@ -111,18 +111,39 @@ export function ScanFlow() {
         const form = new FormData();
         form.append("payload", JSON.stringify(payload));
         form.append("modelCalls", String(estimateCalls(payload)));
-        const counts = payload.counts as Record<string, { method?: string; frame?: number; detections?: { id: string; box: { left: number; top: number; right: number; bottom: number } }[]; setAside?: { id?: string }[] }>;
+        type Box = { left: number; top: number; right: number; bottom: number };
+        const counts = payload.counts as Record<
+          string,
+          {
+            method?: string;
+            frame?: number;
+            detections?: { id: string; box: Box }[];
+            setAside?: { id?: string }[];
+            units?: { id: string; bestFrame: number; box: Box }[];
+            clip?: { step: number };
+          }
+        >;
         for (let i = 0; i < products.length; i++) {
           const c = counts[String(i)];
-          if (!c || c.method !== "frame" || c.frame === undefined || !c.detections?.length) continue;
-          const frame = scan.frames.find((f) => f.index === c.frame);
-          if (!frame) continue;
-          const aside = new Set((c.setAside ?? []).map((d) => d.id));
-          const kept = c.detections.filter((d) => !aside.has(d.id));
-          const pool = kept.length ? kept : c.detections;
-          const largest = pool.reduce((a, b) => (area(b.box) > area(a.box) ? b : a));
+          if (!c) continue;
           try {
-            form.append(`picture-${i}`, await cropPhoto(frame.blob, largest.box), `picture-${i}.jpg`);
+            if (c.method === "frame" && c.frame !== undefined && c.detections?.length) {
+              const frame = scan.frames.find((f) => f.index === c.frame);
+              if (!frame) continue;
+              const aside = new Set((c.setAside ?? []).map((d) => d.id));
+              const kept = c.detections.filter((d) => !aside.has(d.id));
+              const pool = kept.length ? kept : c.detections;
+              const largest = pool.reduce((a, b) => (area(b.box) > area(a.box) ? b : a));
+              form.append(`picture-${i}`, await cropPhoto(frame.blob, largest.box), `picture-${i}.jpg`);
+            } else if (c.method === "track" && c.units?.length && c.clip && scan.clipInfo) {
+              // A tracked unit's clearest view, cut from the original video.
+              const aside = new Set((c.setAside ?? []).map((d) => d.id));
+              const kept = c.units.filter((u) => !aside.has(u.id));
+              const pool = kept.length ? kept : c.units;
+              const largest = pool.reduce((a, b) => (area(b.box) > area(a.box) ? b : a));
+              const photo = await scan.photoAt(largest.bestFrame * c.clip.step, largest.box, scan.clipInfo.scale);
+              if (photo) form.append(`picture-${i}`, photo, `picture-${i}.jpg`);
+            }
           } catch {
             // No photo for this one; the shop shows a placeholder.
           }

@@ -223,3 +223,37 @@ export async function cropPhoto(image: Blob, box: Box): Promise<Blob> {
     bitmap.close();
   }
 }
+
+/** A product photo from the original video at `time`: the unit with a little room around it, no outline. `box` is in clip pixels. */
+export async function videoPhoto(
+  video: HTMLVideoElement,
+  time: number,
+  box: Box,
+  scale: number,
+): Promise<Blob> {
+  await new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error("Seeking in the video timed out.")), 8_000);
+    video.onseeked = () => {
+      window.clearTimeout(timer);
+      resolve();
+    };
+    video.currentTime = Math.min(Math.max(0, time), Math.max(0, video.duration - 0.05));
+  });
+  const w = (box.right - box.left) * scale;
+  const h = (box.bottom - box.top) * scale;
+  const pad = 0.1;
+  const sx = Math.max(0, box.left * scale - w * pad);
+  const sy = Math.max(0, box.top * scale - h * pad);
+  const sw = Math.min(video.videoWidth - sx, w * (1 + 2 * pad));
+  const sh = Math.min(video.videoHeight - sy, h * (1 + 2 * pad));
+  const k = Math.min(1, PHOTO_MAX / Math.max(sw, sh));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sw * k));
+  canvas.height = Math.max(1, Math.round(sh * k));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("This browser cannot draw images.");
+  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Could not save a photo."))), "image/jpeg", 0.85);
+  });
+}

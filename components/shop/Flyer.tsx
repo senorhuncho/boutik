@@ -140,7 +140,7 @@ async function draw(canvas: HTMLCanvasElement, shop: PublicShop, products: Produ
   }
   ctx.fillStyle = "#a39d90";
   ctx.font = "400 26px system-ui, sans-serif";
-  ctx.fillText("boutik", 72, H - 60);
+  ctx.fillText("boutik", 72, H - 38);
 }
 
 export function Flyer({ shop, products }: { shop: PublicShop; products: ProductRow[] }) {

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { canPublish, draftProducts } from "../lib/shop/draft.ts";
+import { canPublish, draftProducts, lessonVerdict } from "../lib/shop/draft.ts";
 
 const kiosk = JSON.parse(readFileSync(new URL("./fixtures/kiosk-scan.json", import.meta.url), "utf8"));
 
@@ -70,4 +70,23 @@ test("a product the counter found nothing for falls back to the model's estimate
   assert.equal(drafts[0]?.stock, 3);
   assert.match(drafts[0]?.stockWhy ?? "", /estimate/);
   assert.ok(drafts[0]?.needsCheck.length === 0 || drafts[0]?.stockHint === undefined);
+});
+
+test("a shop that keeps correcting a product upwards gets the higher estimate as its stock", () => {
+  assert.equal(lessonVerdict(undefined), null);
+  assert.equal(lessonVerdict({ scans: 1, under: 1, over: 0, exact: 0 }), null, "one correction is not a pattern");
+  assert.equal(lessonVerdict({ scans: 3, under: 2, over: 0, exact: 1 }), "under");
+  assert.equal(lessonVerdict({ scans: 3, under: 0, over: 3, exact: 0 }), "over");
+  assert.equal(lessonVerdict({ scans: 4, under: 2, over: 2, exact: 0 }), null);
+  const maxi = kiosk.identify.products.findIndex((p: { name: string }) => p.name.includes("Maxi 4"));
+  const before = draftProducts(kiosk)[maxi];
+  const after = draftProducts(kiosk, { "diapers-softcare": { scans: 2, under: 2, over: 0, exact: 0 } })[maxi];
+  assert.equal(before?.stock, 6);
+  assert.equal(before?.stockHint, 8);
+  assert.equal(after?.stock, 8, "the estimate becomes the stock");
+  assert.equal(after?.stockHint, undefined);
+  assert.match(after?.stockWhy ?? "", /usually have more/);
+  const lowered = draftProducts(kiosk, { "diapers-softcare": { scans: 2, under: 0, over: 2, exact: 0 } })[maxi];
+  assert.equal(lowered?.stock, 6);
+  assert.equal(lowered?.stockHint, undefined, "no hint when the trader keeps lowering it");
 });

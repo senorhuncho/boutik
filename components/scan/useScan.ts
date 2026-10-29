@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { extractAudio, extractKeyframes, loadVideo, type ExtractedAudio, type ExtractedFrame } from "@/lib/media/browser";
 import { encodeTrackingClip, type TrackingClip } from "@/lib/media/clip";
+import { videoPhoto } from "@/lib/media/annotate";
 import { catalogSheets, type SheetUpload } from "@/lib/catalog/memory";
 import { filterDetections } from "@/lib/scan/accuracy";
 import { shapeGroups } from "@/lib/scan/grouping";
@@ -77,6 +78,8 @@ export interface Scan {
   reset: () => void;
   /** Everything the scan produced, serialisable: what the lab exports and the shop saves. */
   exportPayload: (threshold: number, extra?: Record<string, unknown>) => Record<string, unknown>;
+  /** A photo of one tracked unit from the original video (box in clip pixels), or null without a video. */
+  photoAt: (time: number, box: { left: number; top: number; right: number; bottom: number }, scale: number) => Promise<Blob | null>;
 }
 
 export function useScan(): Scan {
@@ -333,12 +336,26 @@ export function useScan(): Scan {
     [audio, clipInfo, counts, frames, identify, prices, steps, video],
   );
 
+  const photoAt = useCallback(
+    async (time: number, box: { left: number; top: number; right: number; bottom: number }, scale: number) => {
+      const video = videoRef.current;
+      if (!video) return null;
+      // One seek at a time on the shared element.
+      const job = photoLock.then(() => videoPhoto(video, time, box, scale));
+      photoLock = job.catch(() => undefined);
+      return job;
+    },
+    [],
+  );
+
   const started = steps.read.status !== "waiting";
   const over = (s: StepState) => s.status === "done" || s.status === "error" || s.status === "skipped";
   const finished = started && !busy && over(steps.identify) && over(steps.prices) && over(steps.count);
 
-  return { video, steps, frames, audio, identify, prices, counts, clipInfo, busy, fatal, started, finished, start, reset, exportPayload };
+  return { video, steps, frames, audio, identify, prices, counts, clipInfo, busy, fatal, started, finished, start, reset, exportPayload, photoAt };
 }
+
+let photoLock: Promise<unknown> = Promise.resolve();
 
 /** Count states without blobs, with the count at the given threshold and what was set aside. */
 export function serialiseCounts(counts: Record<number, CountState>, threshold: number): Record<string, unknown> {

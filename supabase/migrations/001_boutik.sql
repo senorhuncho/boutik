@@ -1,6 +1,6 @@
 -- Boutik: shops, scans, products, the picture memory, corrections and orders.
--- Tables carry the boutik_ prefix because they share a database with another
--- One Market product during the hackathon.
+-- Supabase project "boutik". Tables keep a boutik_ prefix so they can sit in a
+-- shared database too.
 
 create extension if not exists pgcrypto;
 

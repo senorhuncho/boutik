@@ -81,6 +81,25 @@ export function ScanFlow() {
       .catch(() => setMemory([]));
   }, [shop]);
 
+  // The screen stays on while the phone works, and the trader is told when the list is ready.
+  const wakeLock = useRef<{ release: () => Promise<void> } | null>(null);
+  useEffect(() => {
+    if (phase === "scanning") {
+      navigator.wakeLock?.request("screen").then((lock) => (wakeLock.current = lock)).catch(() => undefined);
+      if ("Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => undefined);
+    } else {
+      wakeLock.current?.release().catch(() => undefined);
+      wakeLock.current = null;
+    }
+    if (phase === "confirm" && "Notification" in window && Notification.permission === "granted" && document.visibilityState !== "visible") {
+      try {
+        new Notification("Boutik", { body: "Your list is ready to check." });
+      } catch {
+        // Some browsers only allow notifications from a service worker.
+      }
+    }
+  }, [phase]);
+
   const onFile = useCallback(
     async (file: File) => {
       if (!shop) return;

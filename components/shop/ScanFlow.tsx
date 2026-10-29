@@ -345,6 +345,12 @@ export function ScanFlow() {
           >
             Share on WhatsApp
           </a>
+          <a href={`/s/${shop.slug}/flyer`} className="mt-3 block w-full rounded-xl border border-[var(--color-line)] px-5 py-4 text-center text-base font-semibold">
+            Make a flyer for WhatsApp Status
+          </a>
+          <a href={`/s/${shop.slug}/manage`} className="mt-3 block w-full rounded-xl border border-[var(--color-line)] px-5 py-4 text-center text-base font-semibold">
+            Change stock or prices
+          </a>
           <button
             type="button"
             onClick={() => {

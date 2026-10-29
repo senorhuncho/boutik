@@ -65,8 +65,14 @@ async function draw(canvas: HTMLCanvasElement, shop: PublicShop, products: Produ
   ctx.textBaseline = "top";
   ctx.font = "600 44px system-ui, sans-serif";
   ctx.fillText(fr ? "EN STOCK AUJOURD’HUI" : "IN STOCK TODAY", 72, 90);
-  ctx.font = "700 96px system-ui, sans-serif";
-  ctx.fillText(fitText(ctx, shop.name, W - 144), 72, 150);
+  // The name fits on one line: smaller letters before an ellipsis.
+  let size = 96;
+  ctx.font = `700 ${size}px system-ui, sans-serif`;
+  while (size > 56 && ctx.measureText(shop.name).width > W - 144) {
+    size -= 4;
+    ctx.font = `700 ${size}px system-ui, sans-serif`;
+  }
+  ctx.fillText(fitText(ctx, shop.name, W - 144), 72, 150 + (96 - size) / 2);
   ctx.font = "400 40px system-ui, sans-serif";
   ctx.fillStyle = "#d9d3c7";
   ctx.fillText([shop.quarter, shop.city].filter(Boolean).join(", "), 72, 272);
@@ -74,7 +80,7 @@ async function draw(canvas: HTMLCanvasElement, shop: PublicShop, products: Produ
   const shown = products.filter((p) => p.price !== null).slice(0, 6);
   const cols = 2;
   const cardW = (W - 144 - 36) / cols;
-  const cardH = 430;
+  const cardH = 400;
   const top = 370;
   const images = await Promise.all(shown.map((p) => (p.image_url ? loadImage(p.image_url) : Promise.resolve(null))));
   shown.forEach((p, i) => {
@@ -84,7 +90,7 @@ async function draw(canvas: HTMLCanvasElement, shop: PublicShop, products: Produ
     roundRect(ctx, x, y, cardW, cardH, 28);
     ctx.fill();
     const img = images[i];
-    const ph = 270;
+    const ph = 250;
     ctx.save();
     roundRect(ctx, x, y, cardW, ph, 28);
     ctx.clip();
@@ -102,15 +108,15 @@ async function draw(canvas: HTMLCanvasElement, shop: PublicShop, products: Produ
     ctx.fillText(fitText(ctx, p.name, cardW - 48), x + 24, y + ph + 22);
     ctx.fillStyle = "#c2410c";
     ctx.font = "700 44px system-ui, sans-serif";
-    ctx.fillText(money(p.price as number, p.currency), x + 24, y + ph + 76);
+    const priceText = money(p.price as number, p.currency);
+    ctx.fillText(priceText, x + 24, y + ph + 76);
+    const priceWidth = ctx.measureText(priceText).width;
     ctx.fillStyle = "#6b665c";
-    ctx.font = "400 30px system-ui, sans-serif";
-    const price = ctx.measureText(money(p.price as number, p.currency)).width;
     ctx.font = "400 28px system-ui, sans-serif";
-    ctx.fillText(`/ ${p.price_per || p.unit}`, x + 24 + price * 1.5 + 12, y + ph + 88);
+    ctx.fillText(`/ ${p.price_per || p.unit}`, x + 24 + priceWidth + 12, y + ph + 88);
   });
 
-  const footerY = 1700;
+  const footerY = 1725;
   ctx.fillStyle = "#25D366";
   roundRect(ctx, 72, footerY, W - 144 - 230, 150, 32);
   ctx.fill();

@@ -1,25 +1,24 @@
 @import "tailwindcss";
 
 /*
- * Boutik looks like a well-kept corner shop: white walls, a navy signboard,
- * yellow hand-written price tags, the goods' own photos. One Market's navy
- * and Manrope; the yellow is Boutik's own. Light only: shops live in daylight.
+ * One Market's design language: navy, Manrope, white space, real photographs,
+ * one focal point per screen. Nothing decorative that does not carry meaning.
  */
 @theme {
   --color-paper: #ffffff;
+  --color-surface: #f5f6f8;
   --color-card: #ffffff;
   --color-ink: #002f67;
-  --color-text: #101828;
-  --color-muted: #5b6473;
-  --color-line: #e3e7ee;
-  --color-wash: #f3f5f9;
-  --color-accent: #ffc83d;
-  --color-accent-ink: #3b2c00;
-  --color-accent-soft: #fff4cc;
+  --color-ink-soft: #e8eef7;
+  --color-text: #0f172a;
+  --color-muted: #64748b;
+  --color-faint: #94a3b8;
+  --color-line: #e6e8ee;
   --color-good: #15803d;
   --color-warn: #b45309;
   --color-bad: #b91c1c;
   --color-whatsapp: #25d366;
+  --color-whatsapp-ink: #128c5e;
   --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
@@ -31,15 +30,16 @@ html {
 body {
   background: var(--color-paper);
   color: var(--color-text);
-  font-feature-settings: "tnum" 1, "ss01" 1;
+  font-feature-settings: "tnum" 1;
 }
 
 @layer base {
   h1,
   h2,
   h3 {
-    color: var(--color-ink);
+    color: var(--color-text);
     letter-spacing: -0.02em;
+    font-weight: 700;
   }
 }
 
@@ -50,80 +50,91 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 :focus-visible {
-  outline: 3px solid var(--color-accent);
+  outline: 2px solid var(--color-ink);
   outline-offset: 2px;
 }
 
-/* The yellow price tag: the one loud thing on every page. */
-.tag {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.25rem;
-  background: var(--color-accent);
-  color: var(--color-accent-ink);
-  font-weight: 800;
-  padding: 0.3rem 0.7rem 0.3rem 0.8rem;
-  border-radius: 0.4rem;
-  clip-path: polygon(0 0, calc(100% - 0.55rem) 0, 100% 50%, calc(100% - 0.55rem) 100%, 0 100%);
-  padding-right: 1rem;
-  line-height: 1;
-  white-space: nowrap;
-}
+@layer components {
+  .btn {
+    display: inline-flex;
+    width: 100%;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.75rem;
+    padding: 0.95rem 1.25rem;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.2;
+    transition: background-color 120ms ease, opacity 120ms ease, transform 80ms ease;
+  }
+  .btn:active {
+    transform: scale(0.99);
+  }
+  .btn:disabled {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+  .btn-primary {
+    background: var(--color-ink);
+    color: #fff;
+  }
+  .btn-secondary {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    border: 1.5px solid var(--color-line);
+  }
+  .btn-whatsapp {
+    background: var(--color-whatsapp);
+    color: #fff;
+  }
+  .btn-sm {
+    width: auto;
+    padding: 0.55rem 0.9rem;
+    font-size: 0.875rem;
+    border-radius: 0.6rem;
+  }
 
-.tag small {
-  font-weight: 600;
-  font-size: 0.72em;
-  opacity: 0.8;
-}
+  .field {
+    width: 100%;
+    border: 1.5px solid var(--color-line);
+    border-radius: 0.75rem;
+    background: var(--color-paper);
+    padding: 0.85rem 1rem;
+    font-size: 1rem;
+    line-height: 1.3;
+    outline: none;
+    transition: border-color 120ms ease;
+  }
+  .field::placeholder {
+    color: var(--color-faint);
+  }
+  .field:focus {
+    border-color: var(--color-ink);
+  }
 
-/* The signboard: a shop's name sits on a navy board with a yellow stripe. */
-.signboard {
-  background: var(--color-ink);
-  color: #fff;
-  border-bottom: 6px solid var(--color-accent);
-}
+  .card {
+    background: var(--color-card);
+    border: 1px solid var(--color-line);
+    border-radius: 1rem;
+  }
 
-.btn {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.9rem;
-  padding: 1rem 1.25rem;
-  font-size: 1rem;
-  font-weight: 700;
-  transition: transform 80ms ease;
-}
-.btn:active {
-  transform: scale(0.985);
-}
-.btn-ink {
-  background: var(--color-ink);
-  color: #fff;
-}
-.btn-quiet {
-  background: var(--color-wash);
-  color: var(--color-ink);
-}
-.btn-whatsapp {
-  background: var(--color-whatsapp);
-  color: #fff;
-}
-.btn:disabled {
-  opacity: 0.45;
-}
+  .label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-text);
+    margin-bottom: 0.375rem;
+  }
 
-.field {
-  width: 100%;
-  border: 1.5px solid var(--color-line);
-  border-radius: 0.9rem;
-  background: #fff;
-  padding: 0.9rem 1rem;
-  font-size: 1rem;
-  outline: none;
-}
-.field:focus {
-  border-color: var(--color-ink);
+  .sheet {
+    position: fixed;
+    inset-inline: 0;
+    bottom: 0;
+    background: var(--color-paper);
+    border-top: 1px solid var(--color-line);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, loadOwnedShop } from "@/lib/shop/client";
 import type { MemoryProduct } from "@/lib/shop/service";
+import { Notice, Page, TopBar } from "@/components/ui/Shell";
 
 /**
  * Stock and prices between scans, from the trader's phone: a sale, a new
@@ -19,7 +20,7 @@ export function Manage({ slug }: { slug: string }) {
   useEffect(() => {
     const owned = loadOwnedShop();
     if (!owned || owned.slug !== slug) {
-      setError("This phone does not own this shop. Open the shop from the phone that filmed it.");
+      setError("This phone does not own this shop. Open it from the phone that filmed it.");
       return;
     }
     setToken(owned.token);
@@ -69,63 +70,76 @@ export function Manage({ slug }: { slug: string }) {
     }
   }
 
+  const field = "field h-10 w-full px-2 py-0 text-center text-[15px] font-semibold tabular-nums";
+
   return (
     <main className="min-h-dvh pb-32">
-      <header className="signboard">
-        <div className="mx-auto max-w-xl px-5 pb-5 pt-7">
-          <p className="text-[14px] font-bold text-[var(--color-accent)]">Stock and prices</p>
-          <h1 className="mt-1 text-[30px] font-extrabold leading-tight text-white">{shopName || "Your shop"}</h1>
-          <p className="mt-2 text-[14px] text-white/75">
-            <a className="font-semibold text-white underline underline-offset-2" href={`/s/${slug}`}>
-              See the shop
-            </a>
-            <span aria-hidden="true"> or </span>
-            <a className="font-semibold text-white underline underline-offset-2" href="/scan">
-              film again
-            </a>
-          </p>
-        </div>
-      </header>
-      <div className="mx-auto max-w-xl px-4 pt-4">
-      {error ? <p className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-[var(--color-bad)]">{error}</p> : null}
-      <ul>
-        {products.map((p) => (
-          <li key={p.id} className={`flex items-center gap-3 border-b border-[var(--color-line)] py-3 ${p.published ? "" : "opacity-60"}`}>
-            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-[var(--color-wash)]">
-              {p.imageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element -- the trader's own photo
-                <img src={p.imageUrl} alt="" className="h-full w-full object-cover" />
-              ) : null}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[15px] font-bold">{p.name}</p>
-              <div className="mt-1 flex items-center gap-2 text-sm">
-                <label className="flex items-center gap-1">
-                  <span className="text-xs text-[var(--color-muted)]">stock</span>
-                  <input inputMode="numeric" value={p.stock} onChange={(e) => update(p.id, { stock: Number(e.target.value.replace(/[^\d]/g, "")) || 0 })} className="w-12 rounded-lg border border-[var(--color-line)] bg-transparent px-1 py-1 text-center tabular-nums" />
-                </label>
-                <label className="flex items-center gap-1">
-                  <span className="text-xs text-[var(--color-muted)]">price</span>
-                  <input inputMode="numeric" value={p.price ?? ""} onChange={(e) => update(p.id, { price: Number(e.target.value.replace(/[^\d]/g, "")) || null })} className="w-20 rounded-lg border border-[var(--color-line)] bg-transparent px-1 py-1 text-center tabular-nums" />
-                </label>
-                <button type="button" onClick={() => update(p.id, { published: !p.published })} className={`ml-auto rounded-full px-3 py-1 text-xs font-bold ${p.published ? "bg-[var(--color-accent)] text-[var(--color-accent-ink)]" : "bg-[var(--color-wash)] text-[var(--color-muted)]"}`}>
-                  {p.published ? "on the shop" : "hidden"}
-                </button>
+      <TopBar
+        left={
+          <a href={`/s/${slug}`} className="text-[15px] font-semibold text-[var(--color-ink)]">
+            ← {shopName || "Shop"}
+          </a>
+        }
+        right={
+          <a href="/scan" className="btn btn-secondary btn-sm">
+            Film again
+          </a>
+        }
+      />
+      <Page>
+        <section className="pt-8">
+          <h1 className="text-[26px]">Stock and prices</h1>
+          <p className="mt-2 text-[15px] text-[var(--color-muted)]">Change a number and save. Hidden products stay off the shop page.</p>
+        </section>
+        {error ? (
+          <div className="mt-5">
+            <Notice tone="bad">{error}</Notice>
+          </div>
+        ) : null}
+        <ul className="mt-6 divide-y divide-[var(--color-line)] border-t border-[var(--color-line)]">
+          {products.map((p) => (
+            <li key={p.id} className={`flex items-center gap-4 py-4 ${p.published ? "" : "opacity-60"}`}>
+              <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-[var(--color-surface)]">
+                {p.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- the trader's own photo
+                  <img src={p.imageUrl} alt="" className="h-full w-full object-cover" />
+                ) : null}
               </div>
-            </div>
-          </li>
-        ))}
-      </ul>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[15px] font-semibold">{p.name}</p>
+                <div className="mt-2 grid grid-cols-[1fr_1.4fr_auto] items-center gap-2">
+                  <label className="block">
+                    <span className="sr-only">Stock</span>
+                    <input inputMode="numeric" value={p.stock} onChange={(e) => update(p.id, { stock: Number(e.target.value.replace(/[^\d]/g, "")) || 0 })} className={field} aria-label={`${p.name} stock`} />
+                  </label>
+                  <label className="block">
+                    <span className="sr-only">Price</span>
+                    <input inputMode="numeric" value={p.price ?? ""} placeholder="Price" onChange={(e) => update(p.id, { price: Number(e.target.value.replace(/[^\d]/g, "")) || null })} className={field} aria-label={`${p.name} price`} />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => update(p.id, { published: !p.published })}
+                    aria-pressed={p.published}
+                    className={`h-10 rounded-xl px-3 text-[13px] font-semibold ${p.published ? "bg-[var(--color-ink-soft)] text-[var(--color-ink)]" : "bg-[var(--color-surface)] text-[var(--color-muted)]"}`}
+                  >
+                    {p.published ? "Shown" : "Hidden"}
+                  </button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+        {products.length > 0 ? <p className="mt-3 text-[12px] text-[var(--color-faint)]">Stock · Price in FCFA · Shown on the shop</p> : null}
+      </Page>
       {dirty ? (
-        <div className="fixed inset-x-0 bottom-0 bg-white shadow-[0_-8px_30px_rgba(0,47,103,0.12)]">
-          <div className="mx-auto max-w-xl px-4 pb-4 pt-3">
-            <button type="button" disabled={busy} onClick={() => void save()} className="btn btn-ink">
+        <div className="sheet shadow-[0_-12px_40px_rgba(15,23,42,0.08)]">
+          <Page className="py-3">
+            <button type="button" disabled={busy} onClick={() => void save()} className="btn btn-primary">
               {busy ? "Saving…" : "Save changes"}
             </button>
-          </div>
+          </Page>
         </div>
       ) : null}
-      </div>
     </main>
   );
 }

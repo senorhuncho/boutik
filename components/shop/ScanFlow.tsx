@@ -8,6 +8,7 @@ import { canPublish, type DraftProduct } from "@/lib/shop/draft";
 import { api, loadOwnedShop, saveOwnedShop, shopMemorySheet, type OwnedShop } from "@/lib/shop/client";
 import type { MemoryProduct } from "@/lib/shop/service";
 import { STEP_LABELS, useScan, type StepKey, type StepState } from "@/components/scan/useScan";
+import { Notice, Page, Steps, TopBar } from "@/components/ui/Shell";
 
 /**
  * The trader's whole journey on one page: say who the shop is, film it,
@@ -33,10 +34,6 @@ const STEP_WORDS: Record<StepKey, string> = {
   count: "Counting units",
 };
 
-function formatMoney(amount: number, currency = "XAF"): string {
-  const n = new Intl.NumberFormat("fr-FR").format(amount);
-  return currency === "XAF" ? `${n} FCFA` : currency === "NGN" ? `₦${n}` : `${n} ${currency}`;
-}
 
 function matchExisting(draft: DraftProduct, existing: MemoryProduct[]): MemoryProduct | undefined {
   if (draft.rememberedId) {
@@ -240,24 +237,92 @@ export function ScanFlow() {
 
   const shopUrl = useMemo(() => (shop && typeof window !== "undefined" ? `${window.location.origin}/s/${shop.slug}` : ""), [shop]);
 
+  const stepIndex = phase === "setup" ? 0 : phase === "film" || phase === "scanning" ? 1 : phase === "confirm" || phase === "saving" ? 2 : 3;
+  const publishable = rows.filter((r) => !r.removed && Number(r.priceText) > 0).length;
+
   return (
     <main className="min-h-dvh pb-32">
-      <header className="signboard">
-        <div className="mx-auto max-w-xl px-5 pb-5 pt-7">
-          <p className="text-[14px] font-bold text-[var(--color-accent)]">Boutik</p>
-          <h1 className="mt-1 text-[30px] font-extrabold leading-tight text-white">
-            {phase === "setup" ? "Open your shop" : shop ? shop.name : "Your shop"}
-          </h1>
-          {shop && phase !== "setup" ? (
-            <p className="mt-2 text-[14px] text-white/75">
-              {memory.length ? `${memory.length} products remembered. ` : ""}
-              <a className="font-semibold text-white underline underline-offset-2" href={`/s/${shop.slug}`}>
-                See the shop
-              </a>
-              <span aria-hidden="true"> or </span>
+      <TopBar
+        right={
+          shop && phase !== "setup" ? (
+            <a href={`/s/${shop.slug}`} className="btn btn-secondary btn-sm">
+              View shop
+            </a>
+          ) : null
+        }
+      />
+      <Page>
+        <div className="pt-6">
+          <Steps steps={["Shop", "Film", "Check", "Online"]} current={stepIndex} />
+        </div>
+        {error ? (
+          <div className="mt-5">
+            <Notice tone="bad">{error}</Notice>
+          </div>
+        ) : null}
+
+        {phase === "setup" ? (
+          <section className="pt-6">
+            <h1 className="text-[28px]">Open your shop</h1>
+            <p className="mt-2 text-[15px] text-[var(--color-muted)]">Two details, then you film. Your shop's address is made from its name.</p>
+            <div className="mt-6">
+              <Setup
+                onDone={(s) => {
+                  saveOwnedShop(s);
+                  setShop(s);
+                  setPhase("film");
+                }}
+              />
+            </div>
+          </section>
+        ) : null}
+
+        {phase === "film" && shop ? (
+          <section className="pt-6">
+            <h1 className="text-[28px]">{shop.name}</h1>
+            <p className="mt-2 text-[15px] text-[var(--color-muted)]">
+              {memory.length ? `${memory.length} products remembered from your last scan. ` : ""}
+              Film the shelves and Boutik does the rest.
+            </p>
+            <ol className="mt-8 divide-y divide-[var(--color-line)] border-y border-[var(--color-line)]">
+              {[
+                ["Stand one big step back", "Light behind you, the whole shelf in the picture."],
+                ["Move slowly, shelf by shelf", "About five seconds per shelf. Under 90 seconds in all."],
+                ["Say each product and its price", "“Nido, trois mille cinq cents.” Boutik listens while it looks."],
+              ].map(([title, text], i) => (
+                <li key={title} className="flex gap-4 py-4">
+                  <span className="w-6 shrink-0 text-[13px] font-semibold text-[var(--color-faint)]">0{i + 1}</span>
+                  <div>
+                    <p className="text-[15px] font-semibold">{title}</p>
+                    <p className="mt-0.5 text-[14px] text-[var(--color-muted)]">{text}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <input
+              ref={inputRef}
+              type="file"
+              accept="video/*"
+              capture="environment"
+              className="sr-only"
+              aria-label="Film or choose a video of the shop"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void onFile(file);
+                e.target.value = "";
+              }}
+            />
+            <button type="button" onClick={() => inputRef.current?.click()} className="btn btn-primary mt-8">
+              Film the shelves
+            </button>
+            <p className="mt-3 text-center text-[13px] text-[var(--color-muted)]">
+              The video stays on your phone. Only small pictures and the sound are sent. About two minutes.
+            </p>
+            <p className="mt-8 text-center text-[13px] text-[var(--color-muted)]">
+              Not your shop?{" "}
               <button
                 type="button"
-                className="font-semibold text-white underline underline-offset-2"
+                className="font-semibold text-[var(--color-ink)]"
                 onClick={() => {
                   saveOwnedShop(null);
                   setShop(null);
@@ -265,146 +330,104 @@ export function ScanFlow() {
                   setPhase("setup");
                 }}
               >
-                open another shop
+                Open another one
               </button>
             </p>
-          ) : null}
-        </div>
-      </header>
-      <div className="mx-auto max-w-xl px-4 pt-5">
-      {error ? <p className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-[var(--color-bad)]">{error}</p> : null}
+          </section>
+        ) : null}
 
-      {phase === "setup" ? (
-        <Setup
-          onDone={(s) => {
-            saveOwnedShop(s);
-            setShop(s);
-            setPhase("film");
-          }}
-        />
-      ) : null}
+        {phase === "scanning" ? (
+          <section aria-live="polite" className="pt-6">
+            <h1 className="text-[28px]">Looking at your shelves</h1>
+            <p className="mt-2 text-[15px] text-[var(--color-muted)]">Keep this page open. You can put the phone down.</p>
+            <ul className="mt-8 divide-y divide-[var(--color-line)] border-y border-[var(--color-line)]">
+              {(Object.keys(STEP_WORDS) as StepKey[]).map((key) => (
+                <Step key={key} label={STEP_WORDS[key]} state={scan.steps[key]} detail={STEP_LABELS[key]} />
+              ))}
+            </ul>
+            {scan.identify ? (
+              <p className="mt-6 text-[15px] leading-relaxed text-[var(--color-muted)]">
+                <span className="font-semibold text-[var(--color-text)]">Seen so far</span>
+                <br />
+                {scan.identify.products.map((p) => p.name).join(", ") || "nothing yet"}
+              </p>
+            ) : null}
+          </section>
+        ) : null}
 
-      {phase === "film" ? (
-        <section>
-          <h2 className="text-[22px] font-extrabold">Film your shelves</h2>
-          <ol className="mt-3 space-y-3">
-            {[
-              "Stand one big step from the shelf, with the light behind you.",
-              "Move slowly, shelf by shelf, about 5 seconds per shelf. Under 90 seconds in all.",
-              "Say each product and its price as it comes into view: “Nido, trois mille cinq cents”.",
-              "Keep every pack whole in the picture: a half-seen pack is not counted.",
-            ].map((line, i) => (
-              <li key={line} className="flex gap-3 text-[15px] leading-relaxed">
-                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)] text-[13px] font-extrabold text-[var(--color-accent-ink)]">{i + 1}</span>
-                <span>{line}</span>
-              </li>
-            ))}
-          </ol>
-          <input
-            ref={inputRef}
-            type="file"
-            accept="video/*"
-            capture="environment"
-            className="sr-only"
-            aria-label="Film or choose a video of the shop"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void onFile(file);
-              e.target.value = "";
-            }}
-          />
-          <button type="button" onClick={() => inputRef.current?.click()} className="btn btn-ink mt-6">
-            Film the shop
-          </button>
-          <p className="mt-3 text-center text-[13px] text-[var(--color-muted)]">
-            The video stays on your phone; only small pictures and the sound go up. Takes 2 to 3 minutes.
-          </p>
-        </section>
-      ) : null}
-
-      {phase === "scanning" ? (
-        <section aria-live="polite" className="rounded-2xl bg-[var(--color-wash)] p-5">
-          <h2 className="text-[22px] font-extrabold">Looking at your shelves…</h2>
-          <ul className="mt-4 space-y-3">
-            {(Object.keys(STEP_WORDS) as StepKey[]).map((key) => (
-              <Step key={key} label={STEP_WORDS[key]} state={scan.steps[key]} detail={STEP_LABELS[key]} />
-            ))}
-          </ul>
-          {scan.identify ? (
-            <p className="mt-4 text-[15px] leading-relaxed">
-              <span className="font-bold text-[var(--color-ink)]">Seen so far: </span>
-              {scan.identify.products.map((p) => p.name).join(", ") || "nothing yet"}
+        {phase === "confirm" || phase === "saving" ? (
+          <section className="pt-6">
+            <h1 className="text-[28px]">Check the list</h1>
+            <p className="mt-2 text-[15px] text-[var(--color-muted)]">
+              Fix a count or a price with a tap. A product without a price stays off the shop until it has one.
             </p>
-          ) : null}
-          <p className="mt-4 text-[13px] text-[var(--color-muted)]">Keep this page open. You can put the phone down.</p>
-        </section>
-      ) : null}
+            <ul className="mt-6 divide-y divide-[var(--color-line)] border-t border-[var(--color-line)]">
+              {rows.map((r) => (
+                <ProductRow key={r.key} row={r} onChange={(patch) => update(r.key, patch)} />
+              ))}
+            </ul>
+            <div className="sheet shadow-[0_-12px_40px_rgba(15,23,42,0.08)]">
+              <Page className="py-3">
+                <button type="button" disabled={phase === "saving"} onClick={() => void confirm()} className="btn btn-primary">
+                  {phase === "saving" ? "Saving…" : `Put ${publishable} product${publishable === 1 ? "" : "s"} on my shop`}
+                </button>
+              </Page>
+            </div>
+          </section>
+        ) : null}
 
-      {phase === "confirm" || phase === "saving" ? (
-        <section>
-          <h2 className="text-[22px] font-extrabold">Check the list</h2>
-          <p className="mt-1 text-[15px] text-[var(--color-muted)]">
-            Tap a number to change it. A product without a price stays off the shop until you add one.
-          </p>
-          <ul className="mt-4 space-y-3">
-            {rows.map((r) => (
-              <ProductRow key={r.key} row={r} onChange={(patch) => update(r.key, patch)} />
-            ))}
-          </ul>
-          <div className="fixed inset-x-0 bottom-0 bg-white shadow-[0_-8px_30px_rgba(0,47,103,0.12)]">
-            <div className="mx-auto max-w-xl px-4 pb-4 pt-3">
-              <button type="button" disabled={phase === "saving"} onClick={() => void confirm()} className="btn btn-ink">
-                {phase === "saving"
-                  ? "Saving…"
-                  : `Put ${rows.filter((r) => !r.removed && canPublish({ price: Number(r.priceText) || undefined, needsCheck: [] })).length} products on my shop`}
+        {phase === "done" && shop ? (
+          <section className="pt-6">
+            <h1 className="text-[28px]">Your shop is online</h1>
+            <p className="mt-2 text-[15px] leading-relaxed text-[var(--color-muted)]">
+              {saved?.published ?? 0} products with prices are on your shop
+              {saved && saved.total > saved.published ? `; ${saved.total - saved.published} wait for a price` : ""}. Orders arrive on
+              WhatsApp at {shop.whatsapp.replace(/^237/, "+237 ")}.
+            </p>
+            <div className="card mt-6 flex items-center justify-between gap-3 px-4 py-3">
+              <span className="truncate text-[15px] font-semibold text-[var(--color-ink)]">{shopUrl.replace(/^https?:\/\//, "")}</span>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm shrink-0"
+                onClick={() => navigator.clipboard?.writeText(shopUrl).catch(() => undefined)}
+              >
+                Copy
               </button>
             </div>
-          </div>
-        </section>
-      ) : null}
-
-      {phase === "done" && shop ? (
-        <section>
-          <h2 className="text-[22px] font-extrabold">Your shop is online</h2>
-          <p className="mt-2 text-[15px] leading-relaxed text-[var(--color-muted)]">
-            {saved?.published ?? 0} products with prices are on your shop{saved && saved.total > saved.published ? `; ${saved.total - saved.published} wait for a price` : ""}.
-            Buyers order on WhatsApp at {shop.whatsapp.replace(/^237/, "+237 ")}.
-          </p>
-          <a href={shopUrl} className="mt-5 block rounded-2xl bg-[var(--color-wash)] px-5 py-4 text-center text-[15px] font-bold text-[var(--color-ink)]">
-            {shopUrl.replace(/^https?:\/\//, "")}
-          </a>
-          <a
-            href={`https://wa.me/?text=${encodeURIComponent(
-              shop.language === "fr"
-                ? `Ma boutique ${shop.name} est en ligne. Commandez ici : ${shopUrl}`
-                : `My shop ${shop.name} is online. Order here: ${shopUrl}`,
-            )}`}
-            className="btn btn-whatsapp mt-3"
-          >
-            Share the link on WhatsApp
-          </a>
-          <a href={`/s/${shop.slug}/flyer`} className="btn btn-quiet mt-3">
-            Make a flyer for WhatsApp Status
-          </a>
-          <a href={`/s/${shop.slug}/manage`} className="btn btn-quiet mt-3">
-            Change stock or prices
-          </a>
-          <button
-            type="button"
-            onClick={() => {
-              scan.reset();
-              setRows([]);
-              setScanId(null);
-              setSaved(null);
-              setPhase("film");
-            }}
-            className="mt-3 w-full px-5 py-3 text-[15px] font-semibold text-[var(--color-muted)]"
-          >
-            Film again
-          </button>
-        </section>
-      ) : null}
-      </div>
+            <a
+              href={`https://wa.me/?text=${encodeURIComponent(
+                shop.language === "fr"
+                  ? `Ma boutique ${shop.name} est en ligne. Commandez ici : ${shopUrl}`
+                  : `My shop ${shop.name} is online. Order here: ${shopUrl}`,
+              )}`}
+              className="btn btn-whatsapp mt-4"
+            >
+              Share the link on WhatsApp
+            </a>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <a href={`/s/${shop.slug}/flyer`} className="btn btn-secondary">
+                Status flyer
+              </a>
+              <a href={`/s/${shop.slug}/manage`} className="btn btn-secondary">
+                Stock and prices
+              </a>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                scan.reset();
+                setRows([]);
+                setScanId(null);
+                setSaved(null);
+                setPhase("film");
+              }}
+              className="mt-6 w-full py-3 text-[15px] font-semibold text-[var(--color-muted)]"
+            >
+              Film again
+            </button>
+          </section>
+        ) : null}
+      </Page>
     </main>
   );
 }
@@ -446,68 +469,68 @@ function Setup({ onDone }: { onDone: (shop: OwnedShop) => void }) {
     }
   }
 
-  const field = "field";
   return (
     <form onSubmit={submit} className="space-y-5">
       <div>
-        <label className="block text-sm font-medium" htmlFor="shop-name">
+        <label className="label" htmlFor="shop-name">
           Shop name
         </label>
-        <input id="shop-name" className={`mt-1 ${field}`} value={name} onChange={(e) => setName(e.target.value)} placeholder="Boutique Mama Ngozi" autoComplete="organization" />
+        <input id="shop-name" className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Boutique Mama Ngozi" autoComplete="organization" />
       </div>
       <div>
-        <label className="block text-sm font-medium" htmlFor="shop-whatsapp">
+        <label className="label" htmlFor="shop-whatsapp">
           WhatsApp number for orders
         </label>
-        <input id="shop-whatsapp" className={`mt-1 ${field}`} value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="6 XX XX XX XX" inputMode="tel" autoComplete="tel" />
+        <input id="shop-whatsapp" className="field" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="6 70 12 34 56" inputMode="tel" autoComplete="tel" />
       </div>
       <div>
-        <span className="block text-sm font-medium">Language of the shop page</span>
-        <div className="mt-1 flex gap-2">
+        <span className="label">Language of the shop page</span>
+        <div className="grid grid-cols-2 gap-2">
           {(["fr", "en"] as const).map((l) => (
             <button
               key={l}
               type="button"
               onClick={() => setLanguage(l)}
-              className={`flex-1 rounded-xl border-[1.5px] px-4 py-3 text-base font-semibold ${language === l ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white" : "border-[var(--color-line)]"}`}
+              aria-pressed={language === l}
+              className={`rounded-xl border-[1.5px] px-4 py-3 text-[15px] font-semibold ${language === l ? "border-[var(--color-ink)] bg-[var(--color-ink-soft)] text-[var(--color-ink)]" : "border-[var(--color-line)]"}`}
             >
               {l === "fr" ? "Français" : "English"}
             </button>
           ))}
         </div>
       </div>
-      {error ? <p className="text-sm text-[var(--color-bad)]">{error}</p> : null}
-      <button
-        type="submit"
-        disabled={busy || name.trim().length < 2 || whatsapp.replace(/\D/g, "").length < 8}
-        className="btn btn-ink"
-      >
-        {busy ? "Opening…" : "Continue to filming"}
+      {error ? <Notice tone="bad">{error}</Notice> : null}
+      <button type="submit" disabled={busy || name.trim().length < 2 || whatsapp.replace(/\D/g, "").length < 8} className="btn btn-primary">
+        {busy ? "Opening…" : "Continue"}
       </button>
     </form>
   );
 }
 
 function Step({ label, state, detail }: { label: string; state: StepState; detail: string }) {
-  const dot =
-    state.status === "done"
-      ? "bg-[var(--color-good)]"
-      : state.status === "running"
-        ? "animate-pulse bg-[var(--color-accent)]"
-        : state.status === "error"
-          ? "bg-[var(--color-bad)]"
-          : state.status === "skipped"
-            ? "bg-[var(--color-muted)]"
-            : "bg-[var(--color-line)]";
+  const mark =
+    state.status === "done" ? (
+      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-ink)] text-[11px] text-white" aria-hidden="true">
+        ✓
+      </span>
+    ) : state.status === "running" ? (
+      <span className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--color-line)] border-t-[var(--color-ink)]" aria-hidden="true" />
+    ) : state.status === "error" ? (
+      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-bad)] text-[11px] text-white" aria-hidden="true">
+        !
+      </span>
+    ) : (
+      <span className={`h-5 w-5 rounded-full border-2 ${state.status === "skipped" ? "border-[var(--color-line)] bg-[var(--color-surface)]" : "border-[var(--color-line)]"}`} aria-hidden="true" />
+    );
   return (
-    <li className="flex gap-3">
-      <span className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${dot}`} aria-hidden="true" />
+    <li className="flex items-start gap-3 py-3.5">
+      <span className="mt-0.5 shrink-0">{mark}</span>
       <div className="min-w-0 flex-1">
-        <span className={`text-[15px] ${state.status === "waiting" ? "text-[var(--color-muted)]" : "font-medium"}`} title={detail}>
+        <p className={`text-[15px] ${state.status === "waiting" ? "text-[var(--color-faint)]" : "font-semibold"}`} title={detail}>
           {label}
-        </span>
+        </p>
         {state.note && state.status !== "done" ? (
-          <p className={`mt-0.5 break-words text-sm ${state.status === "error" ? "text-[var(--color-bad)]" : "text-[var(--color-muted)]"}`}>{state.note}</p>
+          <p className={`mt-0.5 break-words text-[13px] ${state.status === "error" ? "text-[var(--color-bad)]" : "text-[var(--color-muted)]"}`}>{state.note}</p>
         ) : null}
       </div>
     </li>
@@ -519,100 +542,93 @@ function ProductRow({ row, onChange }: { row: Row; onChange: (patch: Partial<Row
   const flagged = row.needsCheck.filter((n) => n.startsWith("price:"));
   if (row.removed) {
     return (
-      <li className="flex items-center justify-between rounded-2xl bg-[var(--color-wash)] px-4 py-3 text-sm text-[var(--color-muted)]">
+      <li className="flex items-center justify-between py-3 text-[14px] text-[var(--color-muted)]">
         <span className="line-through">{row.name}</span>
-        <button type="button" className="font-medium underline" onClick={() => onChange({ removed: false })}>
+        <button type="button" className="font-semibold text-[var(--color-ink)]" onClick={() => onChange({ removed: false })}>
           Put back
         </button>
       </li>
     );
   }
   return (
-    <li className="border-b border-[var(--color-line)] pb-4">
-      <div className="flex gap-3">
-        <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-[var(--color-wash)]">
+    <li className="py-4">
+      <div className="flex gap-4">
+        <div className="h-[72px] w-[72px] shrink-0 overflow-hidden rounded-xl bg-[var(--color-surface)]">
           {row.imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- photo cut from the trader's own video
             <img src={row.imageUrl} alt="" className="h-full w-full object-cover" />
           ) : (
-            <div className="flex h-full w-full items-center justify-center text-xs text-[var(--color-muted)]">{row.heardOnly ? "heard" : "no photo"}</div>
+            <div className="flex h-full w-full items-center justify-center text-[11px] text-[var(--color-faint)]">{row.heardOnly ? "heard" : "no photo"}</div>
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <input
-            value={row.name}
-            onChange={(e) => onChange({ name: e.target.value })}
-            className="w-full bg-transparent text-[16px] font-bold leading-snug outline-none"
-            aria-label="Product name"
-          />
-          <p className="mt-0.5 text-xs text-[var(--color-muted)]">
-            {row.brand ? `${row.brand} · ` : ""}per {row.unit}
-            {known ? ` · ${known.name}` : ""}
-            {row.id ? " · already on your shop" : ""}
+          <div className="flex items-start justify-between gap-2">
+            <input
+              value={row.name}
+              onChange={(e) => onChange({ name: e.target.value })}
+              className="w-full bg-transparent text-[16px] font-semibold leading-snug outline-none"
+              aria-label="Product name"
+            />
+            <button type="button" onClick={() => onChange({ removed: true })} className="shrink-0 px-1 text-[13px] font-medium text-[var(--color-muted)]" aria-label="Not on my shelf">
+              Remove
+            </button>
+          </div>
+          <p className="mt-0.5 text-[13px] text-[var(--color-muted)]">
+            {[row.brand, `per ${row.unit}`, known?.name, row.id ? "already on your shop" : ""].filter(Boolean).join(" · ")}
           </p>
-          <div className="mt-2 flex items-center gap-2">
-            <Stepper value={row.stock} onChange={(stock) => onChange({ stock })} />
-            <span className="text-xs text-[var(--color-muted)]">
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <div>
+              <span className="mb-1 block text-[12px] font-semibold text-[var(--color-muted)]">In stock</span>
+              <Stepper value={row.stock} onChange={(stock) => onChange({ stock })} />
               {row.stockHint !== undefined && row.stockHint > row.stock ? (
-                <button type="button" className="underline" onClick={() => onChange({ stock: row.stockHint as number, stockHint: undefined })}>
-                  maybe up to {row.stockHint}
+                <button type="button" className="mt-1 text-[12px] font-semibold text-[var(--color-ink)]" onClick={() => onChange({ stock: row.stockHint as number, stockHint: undefined })}>
+                  Maybe {row.stockHint}
                 </button>
               ) : (
-                row.stockWhy
+                <span className="mt-1 block text-[12px] text-[var(--color-faint)]">{row.stockWhy}</span>
               )}
-            </span>
+            </div>
+            <div>
+              <label className="mb-1 block text-[12px] font-semibold text-[var(--color-muted)]" htmlFor={`price-${row.key}`}>
+                Price (FCFA / {row.pricePer || row.unit})
+              </label>
+              <input
+                id={`price-${row.key}`}
+                inputMode="numeric"
+                value={row.priceText}
+                onChange={(e) => onChange({ priceText: e.target.value.replace(/[^\d]/g, "") })}
+                placeholder="0"
+                className={`field h-11 py-0 text-[16px] font-semibold tabular-nums ${flagged.length ? "border-[var(--color-warn)]" : ""}`}
+              />
+            </div>
           </div>
+          {flagged.length || row.heardOnly ? (
+            <p className="mt-2 text-[13px] text-[var(--color-warn)]">
+              {row.heardOnly ? "Heard but not seen: set the stock and check the price. " : ""}
+              {flagged.map((f) => f.replace(/^price: /, "Price ")).join(" ")}
+              {row.priceQuote ? ` (you said “${row.priceQuote}”)` : ""}
+            </p>
+          ) : null}
         </div>
       </div>
-      <div className="mt-3 flex items-center gap-2">
-        <label className="sr-only" htmlFor={`price-${row.key}`}>
-          Price
-        </label>
-        <div className="flex flex-1 items-center rounded-xl border-[1.5px] border-[var(--color-line)] px-3 focus-within:border-[var(--color-ink)]">
-          <input
-            id={`price-${row.key}`}
-            inputMode="numeric"
-            value={row.priceText}
-            onChange={(e) => onChange({ priceText: e.target.value.replace(/[^\d]/g, "") })}
-            placeholder="Price"
-            className={`w-full bg-transparent py-3 text-base font-bold outline-none ${flagged.length ? "text-[var(--color-warn)]" : "text-[var(--color-ink)]"}`}
-          />
-          <span className="text-sm text-[var(--color-muted)]">FCFA / {row.pricePer || row.unit}</span>
-        </div>
-        <button type="button" onClick={() => onChange({ removed: true })} className="rounded-xl px-3 py-3 text-sm text-[var(--color-muted)]" aria-label="Not on my shelf">
-          ✕
-        </button>
-      </div>
-      {flagged.length || row.heardOnly ? (
-        <p className="mt-2 text-xs text-[var(--color-warn)]">
-          {row.heardOnly ? "Heard but not seen: set the stock and check the price. " : ""}
-          {flagged.map((f) => f.replace(/^price: /, "Price: ")).join(" ")}
-          {row.priceQuote ? ` (you said “${row.priceQuote}”)` : ""}
-        </p>
-      ) : null}
-      {row.priceText ? (
-        <p className="mt-2">
-          <span className="tag text-[14px]">{formatMoney(Number(row.priceText), row.currency)}</span>
-        </p>
-      ) : null}
     </li>
   );
 }
 
 function Stepper({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
-    <div className="flex items-center rounded-xl border-[1.5px] border-[var(--color-line)]">
-      <button type="button" className="px-3 py-2 text-lg leading-none" onClick={() => onChange(Math.max(0, value - 1))} aria-label="One less">
+    <div className="flex h-11 items-center rounded-xl border-[1.5px] border-[var(--color-line)]">
+      <button type="button" className="h-full w-10 text-lg leading-none" onClick={() => onChange(Math.max(0, value - 1))} aria-label="One less">
         −
       </button>
       <input
         inputMode="numeric"
         value={value}
         onChange={(e) => onChange(Math.max(0, Number(e.target.value.replace(/[^\d]/g, "")) || 0))}
-        className="w-12 bg-transparent text-center text-base font-semibold tabular-nums outline-none"
+        className="w-full min-w-0 bg-transparent text-center text-[16px] font-semibold tabular-nums outline-none"
         aria-label="In stock"
       />
-      <button type="button" className="px-3 py-2 text-lg leading-none" onClick={() => onChange(value + 1)} aria-label="One more">
+      <button type="button" className="h-full w-10 text-lg leading-none" onClick={() => onChange(value + 1)} aria-label="One more">
         +
       </button>
     </div>

@@ -12,14 +12,22 @@ export type Command =
   | { kind: "list" }
   | { kind: "orders" }
   | { kind: "delivered"; ref?: string }
+  | { kind: "language"; language: "fr" | "en" }
   | { kind: "help" };
 
 function clean(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-function looksEnglish(text: string): boolean {
-  return /\b(shop|store|my|the|open|price|stock|link|list|help)\b/i.test(text) && !/\b(boutique|prix|lien|liste|aide|ma|mon)\b/i.test(text);
+const FRENCH = /\b(boutique|prix|bonjour|bonsoir|salut|je|vous|ouvrir|lien|liste|aide|mon|ma|mes|c'est|francs?|livr[ée]e?s?|commandes?|rayons?|produits?|il en reste|tu as|combien|merci|voici|français|francais)\b/i;
+const ENGLISH = /\b(shop|store|my|the|open|price|stock|link|list|help|hello|hi|orders?|delivered|sold|how much|thanks|please|english|it is|i have|do you)\b/i;
+
+/** The language a message is written in; null when it gives no clear sign. */
+export function detectLanguage(text: string): "fr" | "en" | null {
+  const fr = (text.match(new RegExp(FRENCH.source, "gi")) ?? []).length;
+  const en = (text.match(new RegExp(ENGLISH.source, "gi")) ?? []).length;
+  if (fr === en) return null;
+  return fr > en ? "fr" : "en";
 }
 
 export function parseCommand(raw: string): Command {
@@ -27,7 +35,10 @@ export function parseCommand(raw: string): Command {
   const lower = text.toLowerCase();
 
   const open = /^(?:boutique|shop|store|ouvrir|open)\s*[:\-]?\s+(.{2,60})$/i.exec(text);
-  if (open) return { kind: "open", name: open[1]!.trim(), language: looksEnglish(text) ? "en" : "fr" };
+  if (open) return { kind: "open", name: open[1]!.trim(), language: detectLanguage(open[1]!) ?? "en" };
+
+  if (/^(english|anglais|en)$/i.test(lower)) return { kind: "language", language: "en" };
+  if (/^(fran[cç]ais|french|fr)$/i.test(lower)) return { kind: "language", language: "fr" };
 
   if (/^(lien|link|url|ma boutique|my shop|boutique|shop)\s*\??$/i.test(lower)) return { kind: "link" };
   if (/^(liste|list|stock|produits|products|inventaire|inventory)\s*\??$/i.test(lower)) return { kind: "list" };
@@ -92,6 +103,7 @@ export const SAY = {
     stockSet: (name: string, n: number) => `${name} : ${n} en stock.`,
     priceSet: (name: string, n: string) => `${name} : ${n}.`,
     online: (n: number, link: string) => `Votre boutique est en ligne avec ${n} produit${n > 1 ? "s" : ""}.\n${link}\n\nPartagez ce lien à vos clients. Pour changer un stock : « Nido 7 ». Un prix : « Nido 3500 ».`,
+    languageSet: "Langue : français. Boutik vous répondra en français. Pour revenir à l'anglais, envoyez « english ».",
     help: "Ce que vous pouvez envoyer ici :\n• une vidéo de vos rayons — Boutik met la boutique à jour\n• un vocal : « Nido il en reste 7, le sucre c'est 900 »\n• « Nido 7 » — stock de Nido à 7\n• « Nido 3500 » — prix de Nido à 3 500 F\n• « livré af03 » — commande livrée, le stock se met à jour\n• « commandes » — vos commandes en attente\n• « liste » — vos produits\n• « lien » — le lien de votre boutique",
     noOrders: "Aucune commande en attente.",
     orders: (lines: string[]) => `Commandes en attente :\n${lines.join("\n")}\n\nRépondez « livré <numéro> » quand c'est livré.`,
@@ -119,6 +131,7 @@ export const SAY = {
     stockSet: (name: string, n: number) => `${name}: ${n} in stock.`,
     priceSet: (name: string, n: string) => `${name}: ${n}.`,
     online: (n: number, link: string) => `Your shop is online with ${n} product${n === 1 ? "" : "s"}.\n${link}\n\nShare this link with your customers. To change a stock: “Nido 7”. A price: “Nido 3500”.`,
+    languageSet: "Language: English. Boutik will reply in English. For French, send “français”.",
     help: "What you can send here:\n• a video of your shelves — Boutik updates the shop\n• a voice note: “Nido, 7 left, sugar is 900”\n• “Nido 7” — Nido stock to 7\n• “Nido 3500” — Nido price to 3,500 F\n• “delivered af03” — order delivered, stock updates\n• “orders” — your open orders\n• “list” — your products\n• “link” — your shop link",
     noOrders: "No open orders.",
     orders: (lines: string[]) => `Open orders:\n${lines.join("\n")}\n\nReply “delivered <number>” once it is delivered.`,

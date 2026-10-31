@@ -4,7 +4,8 @@ import { parseCommand, pickProduct } from "../lib/whatsapp/commands.ts";
 import { inboundMessages, signatureValid } from "../lib/whatsapp/client.ts";
 
 test("a trader's messages become commands", () => {
-  assert.deepEqual(parseCommand("Boutique Chez Élise"), { kind: "open", name: "Chez Élise", language: "fr" });
+  assert.deepEqual(parseCommand("Boutique Chez Élise"), { kind: "open", name: "Chez Élise", language: "en" });
+  assert.deepEqual(parseCommand("Boutique Chez Élise, mes prix et produits"), { kind: "open", name: "Chez Élise, mes prix et produits", language: "fr" });
   assert.deepEqual(parseCommand("shop Mama Ngozi Store"), { kind: "open", name: "Mama Ngozi Store", language: "en" });
   assert.deepEqual(parseCommand("Nido 7"), { kind: "stock", product: "Nido", value: 7 });
   assert.deepEqual(parseCommand("Nido 3500"), { kind: "price", product: "Nido", value: 3500 });

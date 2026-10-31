@@ -57,6 +57,7 @@ export function ScanFlow({ jobId }: { jobId?: string } = {}) {
   const [rows, setRows] = useState<Row[]>([]);
   const [scanId, setScanId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadPct, setLoadPct] = useState<number | null>(null);
   const [saved, setSaved] = useState<{ published: number; total: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const handled = useRef(false);
@@ -84,15 +85,29 @@ export function ScanFlow({ jobId }: { jobId?: string } = {}) {
         saveOwnedShop(owned);
         setShop(owned);
         const res = await fetch(job.videoUrl);
-        if (!res.ok) throw new Error("The video could not be loaded. Send it again on WhatsApp.");
-        const blob = await res.blob();
+        if (!res.ok || !res.body) throw new Error("The video could not be loaded. Send it again on WhatsApp.");
+        // Read the video with progress, so the trader sees it moving on a slow connection.
+        const total = Number(res.headers.get("content-length")) || 0;
+        const reader = res.body.getReader();
+        const parts: Uint8Array<ArrayBuffer>[] = [];
+        let got = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          parts.push(new Uint8Array(value));
+          got += value.byteLength;
+          if (total) setLoadPct(Math.min(99, Math.round((got * 100) / total)));
+        }
+        setLoadPct(null);
+        const blob = new Blob(parts, { type: res.headers.get("content-type") || "video/mp4" });
         const file = new File([blob], "whatsapp-video.mp4", { type: blob.type || "video/mp4" });
         setPhase("scanning");
         handled.current = false;
         await scan.start(file, {});
       } catch (e) {
+        // Stay on this screen with the reason and a way out; never a blank page.
+        setLoadPct(null);
         setError(e instanceof Error ? e.message : "This link could not be opened.");
-        setPhase(loadOwnedShop() ? "film" : "setup");
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per job link
@@ -292,8 +307,38 @@ export function ScanFlow({ jobId }: { jobId?: string } = {}) {
 
         {phase === "loading" ? (
           <section className="pt-6">
-            <h1 className="text-[28px]">Opening your video</h1>
-            <p className="mt-2 text-[15px] text-[var(--color-muted)]">One moment: the video you sent on WhatsApp is loading on this phone.</p>
+            <h1 className="text-[28px]">{error ? "This video did not open" : "Opening your video"}</h1>
+            {error ? (
+              <>
+                <div className="mt-4">
+                  <Notice tone="bad">{error}</Notice>
+                </div>
+                <p className="mt-4 text-[15px] leading-relaxed text-[var(--color-muted)]">
+                  Check your connection and open the link again. If it keeps failing, send the video again on WhatsApp.
+                </p>
+                <div className="mt-6 grid grid-cols-2 gap-3">
+                  <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>
+                    Try again
+                  </button>
+                  {shop ? (
+                    <a href={`/s/${shop.slug}`} className="btn btn-secondary">
+                      View shop
+                    </a>
+                  ) : null}
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="mt-2 text-[15px] text-[var(--color-muted)]">
+                  One moment: the video you sent on WhatsApp is loading on this phone{loadPct !== null ? ` (${loadPct}%)` : ""}.
+                </p>
+                {loadPct !== null ? (
+                  <div className="mt-5 h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-line)]">
+                    <div className="h-full bg-[var(--color-ink)] transition-[width] duration-300" style={{ width: `${loadPct}%` }} />
+                  </div>
+                ) : null}
+              </>
+            )}
           </section>
         ) : null}
 
@@ -488,7 +533,7 @@ function estimateCalls(payload: Record<string, unknown>): number {
 function Setup({ onDone }: { onDone: (shop: OwnedShop) => void }) {
   const [name, setName] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
-  const [language, setLanguage] = useState<"fr" | "en">("fr");
+  const [language, setLanguage] = useState<"fr" | "en">("en");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

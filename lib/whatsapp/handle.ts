@@ -4,7 +4,7 @@ import { understandVoice } from "./voice";
 import { answerCustomer, isOpener, shopSlugIn, type CustomerTurn } from "./customer";
 import { oggOpusToWav } from "../media/opus";
 import { downloadMedia, markRead, sendText, type InboundMessage } from "./client";
-import { SAY, parseCommand, pickProduct } from "./commands";
+import { SAY, detectLanguage, parseCommand, pickProduct } from "./commands";
 
 /** The address the trader's links point at. */
 export function siteUrl(): string {
@@ -16,6 +16,11 @@ const MAX_VIDEO_BYTES = 16 * 1024 * 1024;
 async function shopByPhone(phone: string): Promise<ShopRow | null> {
   const { data } = await db().from("boutik_shops").select("*").eq("whatsapp", phone).order("created_at", { ascending: false }).limit(1).maybeSingle();
   return (data as ShopRow | null) ?? null;
+}
+
+/** For a sender with no shop yet: the language of their message, English when it gives no sign. */
+function guessLanguage(text: string | undefined): "fr" | "en" {
+  return (text && detectLanguage(text)) || "en";
 }
 
 /** Handles one message once; a redelivery of the same id is ignored. */
@@ -33,18 +38,18 @@ export async function handleMessage(msg: InboundMessage): Promise<void> {
   const say = SAY[lang];
 
   if (msg.type === "video" && msg.media) {
-    if (!shop) return sendText(msg.from, SAY.fr.noShop);
+    if (!shop) return sendText(msg.from, SAY[guessLanguage(msg.text)].noShop);
     return handleVideo(shop, msg);
   }
   if (msg.type === "audio" && msg.media) {
-    if (!shop) return sendText(msg.from, SAY.fr.noShop);
+    if (!shop) return sendText(msg.from, SAY.en.noShop);
     return handleVoice(shop, msg);
   }
   if (msg.type !== "text") {
     if (!shop) {
       const session = await customerSession(msg.from);
       if (session) return sendText(msg.from, SAY[session.shop.language].customerTextOnly);
-      return sendText(msg.from, SAY.fr.welcome);
+      return sendText(msg.from, SAY.en.welcome);
     }
     return sendText(msg.from, say.notVideo);
   }
@@ -60,11 +65,16 @@ export async function handleMessage(msg: InboundMessage): Promise<void> {
   }
 
   const command = parseCommand(text);
+  if (command.kind === "language") {
+    if (!shop) return sendText(msg.from, SAY[command.language].welcome);
+    await db().from("boutik_shops").update({ language: command.language }).eq("id", shop.id);
+    return sendText(msg.from, SAY[command.language].languageSet);
+  }
   if (command.kind === "open") {
     const created = await createShop({ name: command.name, whatsapp: msg.from, language: command.language });
     return sendText(msg.from, SAY[created.language].opened(created.name));
   }
-  if (!shop) return sendText(msg.from, /\b(shop|store|open|help|hello|hi)\b/i.test(text) ? SAY.en.welcome : SAY.fr.welcome);
+  if (!shop) return sendText(msg.from, SAY[guessLanguage(text)].welcome);
 
   const link = `${siteUrl()}/s/${shop.slug}`;
   switch (command.kind) {

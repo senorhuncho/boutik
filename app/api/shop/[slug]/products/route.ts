@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { manageToken, readJson, shopError } from "@/lib/shop/http";
 import { confirmProducts, ownedShop, shopProducts, toMemory, type ConfirmedProduct } from "@/lib/shop/service";
 import { BadRequest } from "@/lib/scan/http";
+import { whatsappConfigured } from "@/lib/whatsapp/client";
+import { notifyOnline } from "@/lib/whatsapp/handle";
 
 export const runtime = "nodejs";
 
@@ -26,6 +28,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ slug
     if (!Array.isArray(body.products)) throw new BadRequest("products must be a list.");
     const scanId = typeof body.scanId === "string" && /^[0-9a-f-]{36}$/i.test(body.scanId) ? body.scanId : null;
     const saved = await confirmProducts(shop, scanId, body.products);
+    if (scanId && whatsappConfigured()) await notifyOnline(shop, saved.filter((p) => p.published).length);
     return NextResponse.json({ products: saved.map(toMemory) });
   } catch (error) {
     return shopError(error);

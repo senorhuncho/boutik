@@ -15,7 +15,7 @@ import { Notice, Page, Steps, TopBar } from "@/components/ui/Shell";
  * confirm what Boutik saw with one tap per product, and get the link.
  */
 
-type Phase = "setup" | "film" | "scanning" | "confirm" | "saving" | "done";
+type Phase = "loading" | "setup" | "film" | "scanning" | "confirm" | "saving" | "done";
 
 interface Row extends DraftProduct {
   key: string;
@@ -49,9 +49,9 @@ function matchExisting(draft: DraftProduct, existing: MemoryProduct[]): MemoryPr
   );
 }
 
-export function ScanFlow() {
+export function ScanFlow({ jobId }: { jobId?: string } = {}) {
   const scan = useScan();
-  const [phase, setPhase] = useState<Phase>("setup");
+  const [phase, setPhase] = useState<Phase>(jobId ? "loading" : "setup");
   const [shop, setShop] = useState<OwnedShop | null>(null);
   const [memory, setMemory] = useState<MemoryProduct[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
@@ -64,12 +64,39 @@ export function ScanFlow() {
   const rowsAtScan = useRef<Row[]>([]);
 
   useEffect(() => {
+    if (jobId) return;
     const owned = loadOwnedShop();
     if (owned) {
       setShop(owned);
       setPhase("film");
     }
-  }, []);
+  }, [jobId]);
+
+  // A video sent on WhatsApp: the job gives this phone the shop and the video, and the scan starts by itself.
+  const jobStarted = useRef(false);
+  useEffect(() => {
+    if (!jobId || jobStarted.current) return;
+    jobStarted.current = true;
+    (async () => {
+      try {
+        const job = await api<{ shop: OwnedShop; manageToken: string; videoUrl: string }>(`/api/shop/job/${jobId}`);
+        const owned: OwnedShop = { ...job.shop, token: job.manageToken };
+        saveOwnedShop(owned);
+        setShop(owned);
+        const res = await fetch(job.videoUrl);
+        if (!res.ok) throw new Error("The video could not be loaded. Send it again on WhatsApp.");
+        const blob = await res.blob();
+        const file = new File([blob], "whatsapp-video.mp4", { type: blob.type || "video/mp4" });
+        setPhase("scanning");
+        handled.current = false;
+        await scan.start(file, {});
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "This link could not be opened.");
+        setPhase(loadOwnedShop() ? "film" : "setup");
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per job link
+  }, [jobId]);
 
   useEffect(() => {
     if (!shop) return;
@@ -237,7 +264,7 @@ export function ScanFlow() {
 
   const shopUrl = useMemo(() => (shop && typeof window !== "undefined" ? `${window.location.origin}/s/${shop.slug}` : ""), [shop]);
 
-  const stepIndex = phase === "setup" ? 0 : phase === "film" || phase === "scanning" ? 1 : phase === "confirm" || phase === "saving" ? 2 : 3;
+  const stepIndex = phase === "setup" || phase === "loading" ? 0 : phase === "film" || phase === "scanning" ? 1 : phase === "confirm" || phase === "saving" ? 2 : 3;
   const publishable = rows.filter((r) => !r.removed && Number(r.priceText) > 0).length;
 
   return (
@@ -259,6 +286,13 @@ export function ScanFlow() {
           <div className="mt-5">
             <Notice tone="bad">{error}</Notice>
           </div>
+        ) : null}
+
+        {phase === "loading" ? (
+          <section className="pt-6">
+            <h1 className="text-[28px]">Opening your video</h1>
+            <p className="mt-2 text-[15px] text-[var(--color-muted)]">One moment: the video you sent on WhatsApp is loading on this phone.</p>
+          </section>
         ) : null}
 
         {phase === "setup" ? (

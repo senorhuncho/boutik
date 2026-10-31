@@ -226,7 +226,9 @@ export function ScanFlow({ jobId }: { jobId?: string } = {}) {
     try {
       const products = rows.map((r, i) => {
         const price = Number(r.priceText.replace(/[^\d]/g, ""));
-        const needsCheck = r.needsCheck.filter((n) => !n.startsWith("price:") && !n.startsWith("not seen"));
+        // The trader has just looked at every product, count and price in this list. Confirming it clears the
+        // warnings; a row without a price stays unpublished until one is typed in.
+        const needsCheck: string[] = [];
         const d = rowsAtScan.current[i];
         return {
           id: r.id,

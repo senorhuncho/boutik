@@ -81,7 +81,7 @@ export const SAY = {
   fr: {
     welcome: "Bienvenue sur Boutik. Pour ouvrir votre boutique, envoyez :\nBoutique <nom de votre boutique>\n\nEnsuite, filmez vos rayons en disant les prix et envoyez la vidéo ici.",
     opened: (name: string) => `Boutique « ${name} » ouverte. Filmez vos rayons lentement (moins de 90 secondes) en disant chaque produit et son prix, puis envoyez la vidéo ici.`,
-    videoReceived: (link: string) => `Vidéo reçue. Boutik regarde vos rayons. Ouvrez ce lien pour vérifier la liste et mettre la boutique en ligne :\n${link}`,
+    videoReceived: (shop: string, check: string) => `Vidéo reçue. Votre boutique : ${shop}\n\nBoutik identifie vos produits et leurs prix. Pour voir ou corriger la liste avant publication :\n${check}`,
     videoTooBig: "La vidéo est trop lourde pour WhatsApp (16 Mo). Filmez moins de 90 secondes, ou ouvrez le lien de votre boutique pour la charger directement.",
     notVideo: "Envoyez une vidéo de vos rayons (pas une photo), ou un message comme « Nido 7 » pour changer un stock.",
     link: (link: string) => `Votre boutique : ${link}`,
@@ -108,7 +108,7 @@ export const SAY = {
   en: {
     welcome: "Welcome to Boutik. To open your shop, send:\nShop <your shop name>\n\nThen film your shelves saying the prices and send the video here.",
     opened: (name: string) => `Shop “${name}” is open. Film your shelves slowly (under 90 seconds) saying each product and its price, then send the video here.`,
-    videoReceived: (link: string) => `Video received. Boutik is looking at your shelves. Open this link to check the list and put the shop online:\n${link}`,
+    videoReceived: (shop: string, check: string) => `Video received. Your shop: ${shop}\n\nBoutik is identifying your products and prices. To see or correct the list before it goes live:\n${check}`,
     videoTooBig: "The video is too large for WhatsApp (16 MB). Film under 90 seconds, or open your shop link to upload it directly.",
     notVideo: "Send a video of your shelves (not a photo), or a message like “Nido 7” to change a stock.",
     link: (link: string) => `Your shop: ${link}`,

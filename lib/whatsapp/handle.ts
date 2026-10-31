@@ -257,7 +257,7 @@ async function handleVideo(shop: ShopRow, msg: InboundMessage): Promise<void> {
     return sendText(msg.from, say.videoTooBig);
   }
   await client.from("boutik_jobs").update({ video_path: path }).eq("id", job.id);
-  return sendText(msg.from, say.videoReceived(`${siteUrl()}/scan?job=${job.id}`));
+  return sendText(msg.from, say.videoReceived(`${siteUrl()}/s/${shop.slug}`, `${siteUrl()}/scan?job=${job.id}`));
 }
 
 /** The job behind a link: the shop it belongs to (with its secret) and where its video is. */

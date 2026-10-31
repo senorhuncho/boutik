@@ -56,27 +56,29 @@ export async function understandVoice(
   products: Pick<ProductRow, "name" | "brand" | "unit" | "stock" | "price">[],
 ): Promise<VoiceResult> {
   const list = products.map((p) => `- ${p.name}${p.brand ? ` (${p.brand})` : ""}: ${p.stock} ${p.unit}${p.price ? `, ${p.price} F` : ""}`).join("\n");
-  const messages = [
-    { role: "system" as const, content: INSTRUCTIONS },
-    {
-      role: "user" as const,
-      content: [
-        { type: "text" as const, text: `Products:\n${list || "(none yet)"}` },
-        // WhatsApp voice notes are Ogg/Opus; the type only lists wav and mp3, the servers accept more.
-        { type: "input_audio" as const, input_audio: { data: audioBase64, format: format as "wav" } },
-      ],
-    },
-  ];
-  const chain: { provider: "baseten" | "fireworks" | "meta"; model: string }[] = [];
-  if (providerConfigured("baseten")) chain.push({ provider: "baseten", model: OPEN_MODELS.museSparkOpen });
-  if (providerConfigured("fireworks")) chain.push({ provider: "fireworks", model: OPEN_MODELS.museSparkOpen });
-  chain.push({ provider: "meta", model: metaModel("audio") });
-  let lastError: unknown;
+  const mime = format === "ogg" ? "audio/ogg" : format === "mp3" ? "audio/mpeg" : format === "mp4" ? "audio/mp4" : "audio/wav";
+  // Two ways of attaching audio are in use: OpenAI's input_audio (wav/mp3) and the audio_url data URL
+  // that open-model servers take for any format. WhatsApp voice notes are Ogg/Opus.
+  const asInputAudio = { type: "input_audio", input_audio: { data: audioBase64, format } };
+  const asAudioUrl = { type: "audio_url", audio_url: { url: `data:${mime};base64,${audioBase64}` } };
+  const messagesWith = (audio: unknown) =>
+    [
+      { role: "system", content: INSTRUCTIONS },
+      { role: "user", content: [{ type: "text", text: `Products:\n${list || "(none yet)"}` }, audio] },
+    ] as unknown as Parameters<ReturnType<typeof client>["chat"]["completions"]["create"]>[0]["messages"];
+  const chain: { provider: "baseten" | "fireworks" | "meta"; model: string; audio: unknown }[] = [];
+  if (providerConfigured("baseten")) {
+    chain.push({ provider: "baseten", model: OPEN_MODELS.museSparkOpen, audio: asAudioUrl });
+    chain.push({ provider: "baseten", model: OPEN_MODELS.museSparkOpen, audio: asInputAudio });
+  }
+  if (providerConfigured("fireworks")) chain.push({ provider: "fireworks", model: OPEN_MODELS.museSparkOpen, audio: asAudioUrl });
+  if (format === "wav" || format === "mp3") chain.push({ provider: "meta", model: metaModel("audio"), audio: asInputAudio });
+  const errors: string[] = [];
   for (const step of chain) {
     try {
       const completion = await client(step.provider).chat.completions.create({
         model: step.model,
-        messages,
+        messages: messagesWith(step.audio),
         response_format: { type: "json_schema", json_schema: { name: "voice_update", strict: true, schema } },
         max_tokens: 4000,
         reasoning_effort: "low",
@@ -90,9 +92,10 @@ export async function understandVoice(
         .slice(0, 20);
       return { transcript: String(raw.transcript ?? "").slice(0, 500), updates, model: `${step.model} (${step.provider})` };
     } catch (error) {
-      lastError = error;
-      console.error(`[voice] ${step.provider} failed:`, error instanceof Error ? error.message.slice(0, 200) : error);
+      const message = error instanceof Error ? error.message.slice(0, 200) : String(error);
+      errors.push(`${step.provider}: ${message}`);
+      console.error(`[voice] ${step.provider} failed:`, message);
     }
   }
-  throw lastError instanceof Error ? lastError : new Error("The voice note could not be understood.");
+  throw new Error(errors.join(" | ") || "The voice note could not be understood.");
 }

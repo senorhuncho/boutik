@@ -63,11 +63,21 @@ export async function GET(request: Request) {
           },
         ],
         response_format: { type: "json_schema", json_schema: { name: "product", strict: true, schema } },
-        max_tokens: 200,
+        max_tokens: 2000,
+        reasoning_effort: "low",
       });
       out[key] = { ok: true, ms: Date.now() - started, model, content: completion.choices[0]?.message.content, usage: completion.usage };
     } catch (error) {
       out[key] = { ok: false, ms: Date.now() - started, model, detail: error instanceof Error ? error.message.slice(0, 400) : String(error) };
+    }
+  }
+  if (providerConfigured("fireworks")) {
+    try {
+      const res = await fetch("https://api.fireworks.ai/inference/v1/models", { headers: { Authorization: `Bearer ${process.env.FIREWORKS_API_KEY}` } });
+      const body = (await res.json()) as { data?: { id: string }[] };
+      out["fireworks-models"] = { status: res.status, ids: (body.data ?? []).map((m) => m.id).filter((id) => /llama|whisper|muse|qwen.*vl|vision/i.test(id)).slice(0, 60) };
+    } catch (error) {
+      out["fireworks-models"] = { error: error instanceof Error ? error.message : String(error) };
     }
   }
   return NextResponse.json(out);

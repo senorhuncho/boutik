@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { OPEN_MODELS, client, providerConfigured } from "@/lib/meta/providers";
 import { assignDetections } from "@/lib/meta/spark";
 import { understandVoice } from "@/lib/whatsapp/voice";
+import { oggOpusToWav } from "@/lib/media/opus";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -99,14 +100,19 @@ export async function GET(request: Request) {
     const started = Date.now();
     const format = voice === "wav" || voice === "mp3" ? voice : "ogg";
     try {
-      const audio = await readFile(path.join(process.cwd(), "public", "selftest", `voice.${format}`));
-      const heard = await understandVoice(audio.toString("base64"), format, [
+      let audio: Uint8Array = await readFile(path.join(process.cwd(), "public", "selftest", `voice.${format}`));
+      let sent = format;
+      if (format === "ogg") {
+        audio = await oggOpusToWav(audio);
+        sent = "wav";
+      }
+      const heard = await understandVoice(Buffer.from(audio).toString("base64"), sent, [
         { name: "Nido 1+ 400 g", brand: "Nestlé", unit: "tin", stock: 8, price: 3500 },
         { name: "NAN Comfort 1", brand: "Nestlé", unit: "tin", stock: 4, price: 7500 },
         { name: "France Lait 2", brand: "France Lait", unit: "tin", stock: 5, price: null },
         { name: "Lait Broli", brand: "Broli", unit: "tin", stock: 15, price: 650 },
       ]);
-      out["voice"] = { ok: true, ms: Date.now() - started, ...heard };
+      out["voice"] = { ok: true, ms: Date.now() - started, sent, bytes: audio.byteLength, ...heard };
     } catch (error) {
       out["voice"] = { ok: false, ms: Date.now() - started, detail: error instanceof Error ? error.message.slice(0, 400) : String(error) };
     }

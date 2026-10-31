@@ -1,6 +1,7 @@
 import { BUCKET, db, publicUrl, type ProductRow, type ShopRow } from "../db/server";
 import { createShop, deliverOrder, findOrder, formatMoney, listOrders, shopProducts } from "../shop/service";
 import { understandVoice } from "./voice";
+import { oggOpusToWav } from "../media/opus";
 import { downloadMedia, markRead, sendText, type InboundMessage } from "./client";
 import { SAY, parseCommand, pickProduct } from "./commands";
 
@@ -125,10 +126,20 @@ async function handleVoice(shop: ShopRow, msg: InboundMessage): Promise<void> {
     console.error("[whatsapp] voice download:", e instanceof Error ? e.message : e);
     return sendText(msg.from, say.notUnderstood);
   }
-  const format = media.mime.includes("ogg") || media.mime.includes("opus") ? "ogg" : media.mime.includes("mp4") || media.mime.includes("aac") ? "mp4" : media.mime.includes("mpeg") ? "mp3" : "wav";
+  let format = media.mime.includes("ogg") || media.mime.includes("opus") ? "ogg" : media.mime.includes("mp4") || media.mime.includes("aac") ? "mp4" : media.mime.includes("mpeg") ? "mp3" : "wav";
+  let bytes: Uint8Array = new Uint8Array(media.bytes);
+  if (format === "ogg") {
+    // Opus is decoded here; the models hear WAV far better.
+    try {
+      bytes = await oggOpusToWav(bytes);
+      format = "wav";
+    } catch (e) {
+      console.error("[whatsapp] opus decode:", e instanceof Error ? e.message : e);
+    }
+  }
   let heard;
   try {
-    heard = await understandVoice(Buffer.from(media.bytes).toString("base64"), format, products);
+    heard = await understandVoice(Buffer.from(bytes).toString("base64"), format, products);
   } catch {
     return sendText(msg.from, say.notUnderstood);
   }

@@ -50,6 +50,18 @@ Write the transcript, then every change they state:
 A small number with no price words is a stock; a number of 100 or more with no count words is a price.
 Nothing stated is nothing to update: an empty list is fine.`;
 
+/** The JSON object in a reply, even when the model wrapped or trailed it. */
+function parseLoose(content: string): Partial<VoiceResult> {
+  try {
+    return JSON.parse(content) as Partial<VoiceResult>;
+  } catch {
+    const start = content.indexOf("{");
+    const end = content.lastIndexOf("}");
+    if (start >= 0 && end > start) return JSON.parse(content.slice(start, end + 1)) as Partial<VoiceResult>;
+    throw new Error("reply was not JSON");
+  }
+}
+
 export async function understandVoice(
   audioBase64: string,
   format: string,
@@ -85,7 +97,7 @@ export async function understandVoice(
       });
       const content = completion.choices[0]?.message.content;
       if (!content) throw new Error("empty reply");
-      const raw = JSON.parse(content) as Partial<VoiceResult>;
+      const raw = parseLoose(content);
       const updates = (Array.isArray(raw.updates) ? raw.updates : [])
         .filter((u) => u && typeof u.product === "string" && (u.field === "stock" || u.field === "price") && Number.isFinite(Number(u.value)))
         .map((u) => ({ product: u.product.trim().slice(0, 80), field: u.field, value: Math.max(0, Math.round(Number(u.value))) }))

@@ -24,5 +24,8 @@ export default async function ShopPage({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   const data = await loadPublicShop(slug);
   if (!data) notFound();
-  return <Storefront shop={data.shop} products={data.products} />;
+  const bot = process.env.BOUTIK_WHATSAPP_NUMBER
+    ? { number: process.env.BOUTIK_WHATSAPP_NUMBER.replace(/\D/g, ""), siteUrl: (process.env.NEXT_PUBLIC_SITE_URL ?? "https://boutik-pi.vercel.app").replace(/\/$/, "") }
+    : undefined;
+  return <Storefront shop={data.shop} products={data.products} bot={bot} />;
 }

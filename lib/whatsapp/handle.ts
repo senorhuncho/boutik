@@ -1,6 +1,7 @@
 import { BUCKET, db, publicUrl, type ProductRow, type ShopRow } from "../db/server";
-import { createShop, deliverOrder, findOrder, formatMoney, listOrders, shopProducts } from "../shop/service";
+import { createShop, deliverOrder, findOrder, formatMoney, listOrders, placeOrder, shopProducts } from "../shop/service";
 import { understandVoice } from "./voice";
+import { answerCustomer, isOpener, shopSlugIn, type CustomerTurn } from "./customer";
 import { oggOpusToWav } from "../media/opus";
 import { downloadMedia, markRead, sendText, type InboundMessage } from "./client";
 import { SAY, parseCommand, pickProduct } from "./commands";
@@ -40,16 +41,30 @@ export async function handleMessage(msg: InboundMessage): Promise<void> {
     return handleVoice(shop, msg);
   }
   if (msg.type !== "text") {
-    if (!shop) return sendText(msg.from, SAY.fr.welcome);
+    if (!shop) {
+      const session = await customerSession(msg.from);
+      if (session) return sendText(msg.from, SAY[session.shop.language].customerTextOnly);
+      return sendText(msg.from, SAY.fr.welcome);
+    }
     return sendText(msg.from, say.notVideo);
   }
 
-  const command = parseCommand(msg.text ?? "");
+  const text = msg.text ?? "";
+  if (!shop) {
+    // Not a trader: a buyer asking about a shop, or someone about to open one.
+    const slug = shopSlugIn(text);
+    const asked = slug ? await shopBySlugOrNull(slug) : null;
+    if (asked) return handleCustomer(msg.from, asked, [], text, true);
+    const session = await customerSession(msg.from);
+    if (session && parseCommand(text).kind !== "open") return handleCustomer(msg.from, session.shop, session.history, text, false);
+  }
+
+  const command = parseCommand(text);
   if (command.kind === "open") {
     const created = await createShop({ name: command.name, whatsapp: msg.from, language: command.language });
     return sendText(msg.from, SAY[created.language].opened(created.name));
   }
-  if (!shop) return sendText(msg.from, msg.text && /\b(shop|store|open|help|hello|hi)\b/i.test(msg.text) ? SAY.en.welcome : SAY.fr.welcome);
+  if (!shop) return sendText(msg.from, /\b(shop|store|open|help|hello|hi)\b/i.test(text) ? SAY.en.welcome : SAY.fr.welcome);
 
   const link = `${siteUrl()}/s/${shop.slug}`;
   switch (command.kind) {
@@ -83,6 +98,69 @@ export async function handleMessage(msg: InboundMessage): Promise<void> {
     default:
       return sendText(msg.from, say.help);
   }
+}
+
+async function shopBySlugOrNull(slug: string): Promise<ShopRow | null> {
+  const { data } = await db().from("boutik_shops").select("*").eq("slug", slug).maybeSingle();
+  return (data as ShopRow | null) ?? null;
+}
+
+/** The shop a buyer has been talking about, with the last turns. */
+async function customerSession(from: string): Promise<{ shop: ShopRow; history: CustomerTurn[] } | null> {
+  const client = db();
+  const { data: session } = await client.from("boutik_wa_sessions").select("shop_id, history").eq("wa_from", from).maybeSingle();
+  if (!session) return null;
+  const { data: shop } = await client.from("boutik_shops").select("*").eq("id", session.shop_id).maybeSingle();
+  if (!shop) return null;
+  return { shop: shop as ShopRow, history: Array.isArray(session.history) ? (session.history as CustomerTurn[]) : [] };
+}
+
+/**
+ * A buyer on Boutik's number: Muse Spark Open answers from the shop's live
+ * shelf; when the message is an order it is placed, the trader is told, and
+ * the buyer gets the order number and the trader's WhatsApp.
+ */
+async function handleCustomer(from: string, shop: ShopRow, history: CustomerTurn[], text: string, fresh: boolean): Promise<void> {
+  const say = SAY[shop.language];
+  const client = db();
+  const products = await shopProducts(shop.id, true);
+  const remember = (turns: CustomerTurn[]) =>
+    client.from("boutik_wa_sessions").upsert({ wa_from: from, shop_id: shop.id, history: turns.slice(-8), updated_at: new Date().toISOString() });
+
+  if (fresh && isOpener(text)) {
+    const reply = say.customerHello(shop.name, products.filter((p) => p.stock > 0).length);
+    await remember([{ role: "boutik", text: reply }]);
+    return sendText(from, reply);
+  }
+  let answer;
+  try {
+    answer = await answerCustomer(shop, products, history, text);
+  } catch (e) {
+    console.error("[customer] answer:", e instanceof Error ? e.message : e);
+    await remember(history);
+    return sendText(from, say.customerFailed(shop.whatsapp));
+  }
+  let reply = answer.reply;
+  if (answer.order.length > 0) {
+    const items = answer.order
+      .map((l) => ({ product: pickProduct(products, l.product), qty: l.qty }))
+      .filter((l): l is { product: ProductRow; qty: number } => Boolean(l.product))
+      .map((l) => ({ productId: l.product.id, qty: Math.min(l.qty, Math.max(1, l.product.stock)) }));
+    if (items.length > 0) {
+      try {
+        const { order, lines } = await placeOrder(shop, { items, buyerPhone: from });
+        const ref = order.id.slice(0, 8);
+        reply = `${reply}\n\n${say.customerOrdered(ref, shop.whatsapp)}`;
+        void sendText(shop.whatsapp, say.newOrder(ref, lines.map((l) => `• ${l.qty} × ${l.name}${l.price ? ` — ${formatMoney(l.qty * l.price, order.currency)}` : ""}`), formatMoney(order.total, order.currency), from)).catch((e) =>
+          console.error("[customer] notify trader:", e instanceof Error ? e.message : e),
+        );
+      } catch (e) {
+        console.error("[customer] order:", e instanceof Error ? e.message : e);
+      }
+    }
+  }
+  await remember([...history, { role: "customer", text: text.slice(0, 400) }, { role: "boutik", text: reply.slice(0, 600) }]);
+  return sendText(from, reply);
 }
 
 /** One stock or price change, recorded as a correction; returns the line to say back. */

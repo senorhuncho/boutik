@@ -31,6 +31,9 @@ const T = {
     powered: "Boutique en ligne avec Boutik",
     open: "Ouvrir ma boutique",
     whatsappHint: "La commande s'ouvre dans WhatsApp, prête à envoyer au vendeur.",
+    ask: "Une question ? Demandez à Boutik sur WhatsApp",
+    askHint: "Stock et prix du jour, réponse immédiate.",
+    opener: (name: string, url: string) => `Bonjour, je suis sur la boutique ${name} ${url}`,
   },
   en: {
     meta: (n: number) => `${n} product${n === 1 ? "" : "s"} on the shelf`,
@@ -53,6 +56,9 @@ const T = {
     powered: "Online shop by Boutik",
     open: "Open my shop",
     whatsappHint: "The order opens in WhatsApp, ready to send to the seller.",
+    ask: "A question? Ask Boutik on WhatsApp",
+    askHint: "Today's stock and prices, answered at once.",
+    opener: (name: string, url: string) => `Hello, I am on the shop ${name} ${url}`,
   },
 };
 
@@ -99,8 +105,9 @@ function group(products: ProductRow[], lang: "fr" | "en"): { title: string | nul
   return sections;
 }
 
-export function Storefront({ shop, products }: { shop: PublicShop; products: ProductRow[] }) {
+export function Storefront({ shop, products, bot }: { shop: PublicShop; products: ProductRow[]; bot?: { number: string; siteUrl: string } }) {
   const t = T[shop.language];
+  const askLink = bot ? `https://wa.me/${bot.number}?text=${encodeURIComponent(t.opener(shop.name, `${bot.siteUrl}/s/${shop.slug}`))}` : null;
   const [basket, setBasket] = useState<Record<string, number>>({});
   const [query, setQuery] = useState("");
   const [name, setName] = useState("");
@@ -225,6 +232,18 @@ export function Storefront({ shop, products }: { shop: PublicShop; products: Pro
             </ul>
           </section>
         ))}
+
+        {askLink ? (
+          <a href={askLink} className="card mt-2 mb-8 flex items-center justify-between gap-4 px-4 py-4">
+            <span>
+              <span className="block text-[15px] font-semibold text-[var(--color-text)]">{t.ask}</span>
+              <span className="mt-1 block text-[13px] text-[var(--color-muted)]">{t.askHint}</span>
+            </span>
+            <span className="text-[var(--color-whatsapp-ink)]" aria-hidden>
+              →
+            </span>
+          </a>
+        ) : null}
 
         <footer className="flex items-center justify-between border-t border-[var(--color-line)] py-8 text-[13px] text-[var(--color-muted)]">
           <span className="inline-flex items-center gap-2">

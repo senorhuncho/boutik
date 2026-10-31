@@ -99,6 +99,11 @@ export const SAY = {
     delivered: (ref: string, lines: string[]) => `Commande #${ref} livrée. Stock mis à jour :\n${lines.join("\n")}`,
     heard: (text: string) => `J'ai entendu : « ${text} »`,
     notUnderstood: "Je n'ai pas compris. Dites par exemple : « Nido il en reste 7 » ou « le sucre c'est 900 francs ».",
+    customerHello: (shop: string, n: number) => `Bonjour, ici Boutik pour ${shop}. ${n} produit${n > 1 ? "s" : ""} en rayon aujourd'hui. Demandez-moi un produit ou un prix, par exemple « tu as du Nido ? c'est combien ? », ou passez commande : « je prends 2 Nido ».`,
+    customerOrdered: (ref: string, phone: string) => `Commande #${ref} enregistrée. Le vendeur vous écrit sur WhatsApp pour la livraison : wa.me/${phone}`,
+    customerFailed: (phone: string) => `Je n'arrive pas à répondre pour l'instant. Écrivez directement au vendeur : wa.me/${phone}`,
+    customerTextOnly: "Écrivez-moi votre question en texte, par exemple « tu as du Nido ? c'est combien ? ».",
+    newOrder: (ref: string, lines: string[], total: string, phone: string) => `Nouvelle commande #${ref} par WhatsApp :\n${lines.join("\n")}\nTotal : ${total}\nClient : wa.me/${phone}\n\nRépondez « livré ${ref.slice(0, 4)} » quand c'est livré ; le stock se met à jour.`,
   },
   en: {
     welcome: "Welcome to Boutik. To open your shop, send:\nShop <your shop name>\n\nThen film your shelves saying the prices and send the video here.",
@@ -121,5 +126,10 @@ export const SAY = {
     delivered: (ref: string, lines: string[]) => `Order #${ref} delivered. Stock updated:\n${lines.join("\n")}`,
     heard: (text: string) => `I heard: “${text}”`,
     notUnderstood: "I didn't get that. Say for example: “Nido, 7 left” or “sugar is 900 francs”.",
+    customerHello: (shop: string, n: number) => `Hello, this is Boutik for ${shop}. ${n} product${n === 1 ? "" : "s"} on the shelf today. Ask me about a product or a price, like “do you have Nido? how much?”, or order: “I'll take 2 Nido”.`,
+    customerOrdered: (ref: string, phone: string) => `Order #${ref} placed. The seller will message you on WhatsApp about delivery: wa.me/${phone}`,
+    customerFailed: (phone: string) => `I can't answer right now. Message the seller directly: wa.me/${phone}`,
+    customerTextOnly: "Send me your question as text, for example “do you have Nido? how much?”.",
+    newOrder: (ref: string, lines: string[], total: string, phone: string) => `New order #${ref} over WhatsApp:\n${lines.join("\n")}\nTotal: ${total}\nBuyer: wa.me/${phone}\n\nReply “delivered ${ref.slice(0, 4)}” once it is delivered; stock updates.`,
   },
 } as const;

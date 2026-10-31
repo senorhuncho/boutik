@@ -60,3 +60,19 @@ test("webhook payloads are read and signed", () => {
   assert.equal(signatureValid("{}", "sha256=" + "4b7f3b1e6e2a4e8c4a6a2f0b7a3f9b1c0e5b1e3f2a6c8d9e0f1a2b3c4d5e6f70"), false);
   delete process.env.WHATSAPP_APP_SECRET;
 });
+
+import { isOpener, shopSlugIn } from "../lib/whatsapp/customer.ts";
+
+test("a buyer's first message names the shop by link or tag, never by shop name", () => {
+  assert.equal(shopSlugIn("Bonjour, je suis sur la boutique Chez Mama https://boutik-pi.vercel.app/s/chez-mama"), "chez-mama");
+  assert.equal(shopSlugIn("#demo-makepe tu as du Nido ?"), "demo-makepe");
+  assert.equal(shopSlugIn("Boutique Chez Mama"), null);
+  assert.equal(shopSlugIn("Nido 7"), null);
+});
+
+test("the pre-filled opener is told apart from a real question", () => {
+  assert.equal(isOpener("Bonjour, je suis sur la boutique Chez Mama https://boutik-pi.vercel.app/s/chez-mama"), true);
+  assert.equal(isOpener("Hello, I am on the shop Demo Makepe https://boutik-pi.vercel.app/s/demo-makepe"), true);
+  assert.equal(isOpener("Bonjour https://boutik-pi.vercel.app/s/chez-mama tu as du Nido ? c'est combien"), false);
+  assert.equal(isOpener("#chez-mama je prends 2 Nido"), false);
+});

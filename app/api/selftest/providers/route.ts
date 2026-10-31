@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { OPEN_MODELS, client, providerConfigured } from "@/lib/meta/providers";
 import { assignDetections } from "@/lib/meta/spark";
 import { understandVoice } from "@/lib/whatsapp/voice";
+import { answerCustomer } from "@/lib/whatsapp/customer";
 import { oggOpusToWav } from "@/lib/media/opus";
 
 export const runtime = "nodejs";
@@ -115,6 +116,25 @@ export async function GET(request: Request) {
       out["voice"] = { ok: true, ms: Date.now() - started, sent, bytes: audio.byteLength, ...heard };
     } catch (error) {
       out["voice"] = { ok: false, ms: Date.now() - started, detail: error instanceof Error ? error.message.slice(0, 400) : String(error) };
+    }
+  }
+  // A buyer's question and an order, answered from a small shelf.
+  const customer = new URL(request.url).searchParams.get("customer");
+  if (customer) {
+    const started = Date.now();
+    const shelf = [
+      { name: "Nido 1+ 400 g", brand: "Nestlé", unit: "tin", stock: 8, price: 3500, published: true },
+      { name: "Sucre Sosucam 1 kg", brand: "Sosucam", unit: "packet", stock: 12, price: 900, published: true },
+      { name: "Huile Mayor 1 L", brand: "Mayor", unit: "bottle", stock: 0, price: 1800, published: true },
+    ];
+    const shop = { name: "Chez Mama", city: "Douala", quarter: "Makepe", language: "fr" as const };
+    try {
+      const question = customer === "order" ? "ok je prends 2 Nido et un sucre" : "bonsoir, tu as du Nido ? c'est combien ? et l'huile ?";
+      const history = customer === "order" ? [{ role: "customer" as const, text: "tu as du Nido ?" }, { role: "boutik" as const, text: "Oui, il reste 8 boîtes de Nido 1+ 400 g à 3 500 F." }] : [];
+      const answer = await answerCustomer(shop, shelf, history, question);
+      out["customer"] = { ok: true, ms: Date.now() - started, question, ...answer };
+    } catch (error) {
+      out["customer"] = { ok: false, ms: Date.now() - started, detail: error instanceof Error ? error.message.slice(0, 400) : String(error) };
     }
   }
   if (providerConfigured("fireworks")) {

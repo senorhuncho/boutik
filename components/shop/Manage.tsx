@@ -81,9 +81,14 @@ export function Manage({ slug }: { slug: string }) {
           </a>
         }
         right={
-          <a href="/scan" className="btn btn-secondary btn-sm">
-            Film again
-          </a>
+          <span className="flex items-center gap-2">
+            <a href={`/s/${slug}/orders`} className="btn btn-secondary btn-sm">
+              Orders
+            </a>
+            <a href="/scan" className="btn btn-secondary btn-sm">
+              Film again
+            </a>
+          </span>
         }
       />
       <Page>

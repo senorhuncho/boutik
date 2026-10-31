@@ -438,12 +438,15 @@ export function ScanFlow({ jobId }: { jobId?: string } = {}) {
             >
               Share the link on WhatsApp
             </a>
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              <a href={`/s/${shop.slug}/flyer`} className="btn btn-secondary">
+            <div className="mt-3 grid grid-cols-3 gap-3">
+              <a href={`/s/${shop.slug}/flyer`} className="btn btn-secondary px-2 text-[14px]">
                 Status flyer
               </a>
-              <a href={`/s/${shop.slug}/manage`} className="btn btn-secondary">
-                Stock and prices
+              <a href={`/s/${shop.slug}/manage`} className="btn btn-secondary px-2 text-[14px]">
+                Stock
+              </a>
+              <a href={`/s/${shop.slug}/orders`} className="btn btn-secondary px-2 text-[14px]">
+                Orders
               </a>
             </div>
             <button

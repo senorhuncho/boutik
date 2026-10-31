@@ -15,6 +15,20 @@ Built for the Meta Global AI Developer Hackathon (Startup track, "Build for Your
 5. **Check.** The trader sees the list with photos cut from their own video, fixes a count or a price with one tap, removes what is not for sale, and publishes.
 6. **Sell.** A shop page (`/s/<shop>`) with search and sections, a basket that opens WhatsApp with the order written out, and Status flyers (six products per slide, numbered) drawn on the phone from the shop's own photos.
 7. **Remember.** The shop keeps its products and pictures; the next scan starts from them. Every correction is recorded, and after a pattern of corrections the stock suggestion for that product changes.
+8. **Run it from WhatsApp.** The trader opens a shop by messaging Boutik's number, sends the shelf video there, and gets a link that runs the scan on their phone. Afterwards a text ("Nido 7", "Nido 3500") or a voice note ("Nido il en reste 7, le sucre c'est 900") updates stock and prices; "commandes" lists open orders and "livré <ref>" marks one delivered, which takes the units off the stock.
+9. **Answer buyers.** From the shop page a buyer can ask Boutik on WhatsApp ("tu as du Nido ? c'est combien ?"). Muse Spark Open answers from today's shelf in the buyer's language, and when they order, the order is placed, the trader is told, and the buyer gets the order number and the trader's WhatsApp.
+
+## Accuracy so far
+
+Measured in the lab against hand counts, on real videos from Douala (no cherry-picking; the first attempt on each video is in the notes too).
+
+| Video | Products | Hand-counted units | Average count error per product |
+| --- | --- | --- | --- |
+| Provision shop, 88 s, 480×854, ~17 products | 13 counted by hand | 131 | 3.0 units (SAM tracking), best run 2.6; Spark's estimate 3.3–3.6 |
+| Diaper kiosk, 8 products | 8 | 36 | 1.9–2.3 units |
+| Clothes stall, 12 single pieces | 12 | 12 | 12/12 exact (Spark and SAM) |
+
+Live checks on the deployed app: sorting six close-ups into three products plus "other" 6/6 correct in 2.0 s; a WhatsApp voice note (Ogg/Opus) understood and turned into a price change in 4.3 s; a buyer's question answered from the shelf in 2.3 s and an order parsed in 1.3 s — all on Muse Spark Open.
 
 ## The market catalogue
 
@@ -24,12 +38,13 @@ Built for the Meta Global AI Developer Hackathon (Startup track, "Build for Your
 
 | Model | Role |
 | --- | --- |
-| Muse Spark 1.3 | Product identification with reference sheets; sorting look-alikes from close-ups; verifying detections; matching spoken prices |
+| Muse Spark 1.3 | Product identification from keyframes with reference sheets (catalogue and shop memory) |
 | SAM 3.1 | Video tracking of units through the clip; image detection per keyframe |
 | Muse Voice Transcribe | Transcription of the trader's prices, biased with product names |
-| Muse Spark 1.2 (audio) | Second transcript, for disagreement checks |
+| Muse Spark 1.2 (audio) | Fallback ear for prices |
+| Muse Spark Open (open weights, on Baseten, fallback Fireworks) | Sorting look-alikes and verifying detections; matching spoken prices; hearing WhatsApp voice notes; answering buyers from the live shelf |
 
-All calls go through the Meta Model API (`https://api.meta.ai/v1`) with the OpenAI SDK.
+Identification, SAM and Voice Transcribe go through the Meta Model API (`https://api.meta.ai/v1`); the rest runs on Meta's open-weight Muse Spark Open served by Baseten (`inference.baseten.co/v1`) and Fireworks, all with the OpenAI SDK. `lib/meta/providers.ts` routes each role; `BOUTIK_SPARK_<ROLE>=meta|baseten` overrides it.
 
 ## Stack
 

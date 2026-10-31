@@ -94,11 +94,13 @@ export async function GET(request: Request) {
     }
   }
   // A voice note like WhatsApp sends (Ogg/Opus), heard against a product list.
-  if (new URL(request.url).searchParams.get("voice") === "1") {
+  const voice = new URL(request.url).searchParams.get("voice");
+  if (voice) {
     const started = Date.now();
+    const format = voice === "wav" || voice === "mp3" ? voice : "ogg";
     try {
-      const ogg = await readFile(path.join(process.cwd(), "public", "selftest", "voice.ogg"));
-      const heard = await understandVoice(ogg.toString("base64"), "ogg", [
+      const audio = await readFile(path.join(process.cwd(), "public", "selftest", `voice.${format}`));
+      const heard = await understandVoice(audio.toString("base64"), format, [
         { name: "Nido 1+ 400 g", brand: "Nestlé", unit: "tin", stock: 8, price: 3500 },
         { name: "NAN Comfort 1", brand: "Nestlé", unit: "tin", stock: 4, price: 7500 },
         { name: "France Lait 2", brand: "France Lait", unit: "tin", stock: 5, price: null },

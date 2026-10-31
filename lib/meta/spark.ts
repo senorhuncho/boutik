@@ -1,5 +1,6 @@
 import type OpenAI from "openai";
-import { MODELS, meta } from "./client";
+import { MODELS } from "./client";
+import { client as providerClient, metaModel, providerConfigured, sparkRoute, OPEN_MODELS, type SparkRole } from "./providers";
 import { assignSchema, identifySchema, pricesSchema } from "@/lib/scan/schemas";
 import { NO_SPEECH, isNoSpeech, normalizeAssignments, normalizeIdentify, normalizePrices } from "@/lib/scan/normalize";
 import type { PriceMatch, Product, StallSummary, Transcript } from "@/lib/scan/types";
@@ -112,6 +113,39 @@ function jsonFormat(name: string, schema: object) {
   };
 }
 
+type SparkParams = Omit<OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming, "model">;
+
+/**
+ * A Muse Spark call for one role, on whichever provider the role is routed
+ * to. When the open model on Baseten fails, Fireworks (same model) is tried,
+ * then Meta's own Muse Spark 1.3. Returns the completion and the model used.
+ */
+async function sparkCall(role: SparkRole, params: SparkParams): Promise<{ completion: OpenAI.Chat.Completions.ChatCompletion; model: string }> {
+  const route = sparkRoute(role);
+  const chain: { provider: "meta" | "baseten" | "fireworks"; model: string }[] = [route];
+  if (route.provider !== "meta") {
+    if (route.provider !== "fireworks" && providerConfigured("fireworks")) chain.push({ provider: "fireworks", model: OPEN_MODELS.museSparkOpen });
+    chain.push({ provider: "meta", model: metaModel(role) });
+  }
+  let lastError: unknown;
+  for (const step of chain) {
+    try {
+      const completion = await providerClient(step.provider).chat.completions.create({
+        ...params,
+        model: step.model,
+        // The open model reasons before it answers; leave it room, or the answer is cut off.
+        max_tokens: params.max_tokens ?? (step.provider === "meta" ? undefined : 6000),
+      });
+      if (!completion.choices[0]?.message.content) throw new Error(`${step.provider} returned an empty reply.`);
+      return { completion, model: step.provider === "meta" ? step.model : `${step.model} (${step.provider})` };
+    } catch (error) {
+      lastError = error;
+      console.error(`[spark:${role}] ${step.provider} failed:`, error instanceof Error ? error.message.slice(0, 200) : error);
+    }
+  }
+  throw lastError;
+}
+
 function parseJson(content: string | null | undefined): unknown {
   if (!content) throw new Error("Muse Spark returned an empty reply.");
   try {
@@ -150,8 +184,7 @@ export async function identifyProducts(
     content.push({ type: "image_url", image_url: { url: sheet.dataUrl } });
   });
 
-  const completion = await meta().chat.completions.create({
-    model: MODELS.vision,
+  const { completion, model } = await sparkCall("identify", {
     messages: [
       { role: "system", content: `${IDENTIFY_INSTRUCTIONS}\n\nList of known goods (id: name (brand); marks; shape):\n${knownGoodsText()}` },
       { role: "user", content },
@@ -161,7 +194,7 @@ export async function identifyProducts(
   });
 
   const raw = parseJson(completion.choices[0]?.message.content);
-  return { ...normalizeIdentify(raw, frames.length), model: MODELS.vision };
+  return { ...normalizeIdentify(raw, frames.length), model };
 }
 
 /**
@@ -180,8 +213,7 @@ export async function transcribeWithSpark(wavBase64: string): Promise<Transcript
 async function listenWithSpark(wavBase64: string): Promise<Transcript> {
   const started = Date.now();
   try {
-    const completion = await meta().chat.completions.create({
-      model: MODELS.audio,
+    const { completion, model } = await sparkCall("audio", {
       messages: [
         {
           role: "user",
@@ -204,7 +236,7 @@ async function listenWithSpark(wavBase64: string): Promise<Transcript> {
     const text = (completion.choices[0]?.message.content ?? "").trim();
     return {
       source: "spark-audio",
-      model: MODELS.audio,
+      model,
       text: isNoSpeech(text) ? "" : text,
       ms: Date.now() - started,
     };
@@ -238,8 +270,7 @@ export async function extractPrices(
     .map((t, i) => `Transcript ${String.fromCharCode(65 + i)}:\n${t.text}`)
     .join("\n\n");
 
-  const completion = await meta().chat.completions.create({
-    model: MODELS.vision,
+  const { completion, model } = await sparkCall("prices", {
     messages: [
       { role: "system", content: PRICES_INSTRUCTIONS },
       {
@@ -252,7 +283,7 @@ export async function extractPrices(
   });
 
   const raw = parseJson(completion.choices[0]?.message.content);
-  return { ...normalizePrices(raw, products.length, products.map((p) => p.catalogId)), model: MODELS.vision };
+  return { ...normalizePrices(raw, products.length, products.map((p) => p.catalogId)), model };
 }
 
 const ASSIGN_INSTRUCTIONS = `An object detector found units on a market stall. Each unit carries a number: either a numbered box
@@ -313,8 +344,7 @@ export async function assignDetections(
         .map((p) => `- ${describe(p)}`)
         .join("\n")}`
     : "";
-  const completion = await meta().chat.completions.create({
-    model: MODELS.vision,
+  const { completion, model } = await sparkCall("sort", {
     messages: [
       { role: "system", content: products.length === 1 ? VERIFY_INSTRUCTIONS : ASSIGN_INSTRUCTIONS },
       {
@@ -344,6 +374,6 @@ export async function assignDetections(
   const raw = parseJson(completion.choices[0]?.message.content);
   return {
     assignments: normalizeAssignments(raw, labelCount, new Set(products.map((p) => p.index))),
-    model: MODELS.vision,
+    model,
   };
 }

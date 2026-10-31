@@ -45,7 +45,7 @@ export function client(provider: Provider): OpenAI {
   return c;
 }
 
-export type SparkRole = "identify" | "sort" | "prices";
+export type SparkRole = "identify" | "sort" | "prices" | "audio";
 
 /**
  * Which provider and model a Spark role uses. BOUTIK_SPARK_<ROLE> can be
@@ -56,5 +56,10 @@ export function sparkRoute(role: SparkRole): { provider: Provider; model: string
   const wanted = process.env[`BOUTIK_SPARK_${role.toUpperCase()}`]?.trim().toLowerCase();
   const useBaseten = wanted === "baseten" || (wanted !== "meta" && role !== "identify" && providerConfigured("baseten"));
   if (useBaseten && providerConfigured("baseten")) return { provider: "baseten", model: OPEN_MODELS.museSparkOpen };
-  return { provider: "meta", model: process.env.BOUTIK_VISION_MODEL ?? "muse-spark-1.3" };
+  return { provider: "meta", model: metaModel(role) };
+}
+
+/** Meta's own model for a role: Spark 1.3 sees, Spark 1.2 still hears better. */
+export function metaModel(role: SparkRole): string {
+  return role === "audio" ? process.env.BOUTIK_AUDIO_MODEL ?? "muse-spark-1.2" : process.env.BOUTIK_VISION_MODEL ?? "muse-spark-1.3";
 }

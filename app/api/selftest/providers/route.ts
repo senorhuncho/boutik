@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { OPEN_MODELS, client, providerConfigured } from "@/lib/meta/providers";
+import { assignDetections } from "@/lib/meta/spark";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -69,6 +70,26 @@ export async function GET(request: Request) {
       out[key] = { ok: true, ms: Date.now() - started, model, content: completion.choices[0]?.message.content, usage: completion.usage };
     } catch (error) {
       out[key] = { ok: false, ms: Date.now() - started, model, detail: error instanceof Error ? error.message.slice(0, 400) : String(error) };
+    }
+  }
+  // The real sorting call, as the scan makes it, on whichever provider the "sort" role is routed to.
+  if (new URL(request.url).searchParams.get("assign") === "1") {
+    const started = Date.now();
+    try {
+      const sheet = await readFile(path.join(process.cwd(), "public", "selftest", "assign-sheet.jpg"));
+      const result = await assignDetections(
+        `data:image/jpeg;base64,${sheet.toString("base64")}`,
+        [
+          { index: 0, name: "Nido 1+ growing-up milk", brand: "Nestlé", appearance: "yellow tin with a red band and a blue 1+ badge", marks: ["NIDO", "1+"] },
+          { index: 1, name: "NAN Comfort 1", brand: "Nestlé", appearance: "white tin with a green and blue stripe and a big 1", marks: ["NAN", "COMFORT", "1"] },
+          { index: 2, name: "France Lait 2", brand: "France Lait", appearance: "white tin with a blue oval logo and a large 2", marks: ["FRANCE LAIT", "2"] },
+        ],
+        6,
+        [{ name: "Broli milk", brand: "Broli", appearance: "cream tin with a red BROLI name and a bowl of milk", marks: ["BROLI"] }],
+      );
+      out["assign"] = { ok: true, ms: Date.now() - started, model: result.model, assignments: Object.fromEntries(result.assignments), expected: { 1: 0, 2: 1, 3: 2, 4: -1, 5: 0, 6: 1 } };
+    } catch (error) {
+      out["assign"] = { ok: false, ms: Date.now() - started, detail: error instanceof Error ? error.message.slice(0, 400) : String(error) };
     }
   }
   if (providerConfigured("fireworks")) {

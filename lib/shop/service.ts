@@ -326,3 +326,51 @@ export function orderMessage(
 export function whatsappLink(phone: string, text: string): string {
   return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
 }
+
+/** Orders a shop has received, newest first. */
+export async function listOrders(shopId: string, status?: OrderRow["status"]): Promise<OrderRow[]> {
+  let query = db().from("boutik_orders").select("*").eq("shop_id", shopId).order("created_at", { ascending: false }).limit(50);
+  if (status) query = query.eq("status", status);
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return (data ?? []) as OrderRow[];
+}
+
+/** The order a trader means by "livré af035bb6": the id prefix from the WhatsApp message, or the latest new order when none is given. */
+export async function findOrder(shopId: string, ref?: string): Promise<OrderRow | null> {
+  const orders = await listOrders(shopId, "new");
+  const prefix = (ref ?? "").trim().toLowerCase().replace(/^#/, "");
+  if (!prefix) return orders[0] ?? null;
+  return orders.find((o) => o.id.toLowerCase().startsWith(prefix)) ?? null;
+}
+
+/**
+ * Marks an order delivered and takes its quantities off the stock, never
+ * below zero. The same order cannot be delivered twice.
+ */
+export async function deliverOrder(order: OrderRow): Promise<{ order: OrderRow; stock: { name: string; left: number }[] }> {
+  const client = db();
+  const { data: updated, error } = await client
+    .from("boutik_orders")
+    .update({ status: "delivered" })
+    .eq("id", order.id)
+    .eq("status", "new")
+    .select("*")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!updated) throw new BadRequest("This order was already handled.");
+  const stock: { name: string; left: number }[] = [];
+  for (const line of order.items) {
+    const { data: product } = await client.from("boutik_products").select("id, name, stock").eq("id", line.productId).maybeSingle();
+    if (!product) continue;
+    const left = Math.max(0, (product.stock as number) - line.qty);
+    await client.from("boutik_products").update({ stock: left, updated_at: new Date().toISOString() }).eq("id", product.id);
+    stock.push({ name: product.name as string, left });
+  }
+  return { order: updated as OrderRow, stock };
+}
+
+export async function cancelOrder(order: OrderRow): Promise<void> {
+  const { error } = await db().from("boutik_orders").update({ status: "cancelled" }).eq("id", order.id).eq("status", "new");
+  if (error) throw new Error(error.message);
+}

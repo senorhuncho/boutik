@@ -4,6 +4,7 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import { OPEN_MODELS, client, providerConfigured } from "@/lib/meta/providers";
 import { assignDetections } from "@/lib/meta/spark";
+import { understandVoice } from "@/lib/whatsapp/voice";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -90,6 +91,22 @@ export async function GET(request: Request) {
       out["assign"] = { ok: true, ms: Date.now() - started, model: result.model, assignments: Object.fromEntries(result.assignments), expected: { 1: 0, 2: 1, 3: 2, 4: -1, 5: 0, 6: 1 } };
     } catch (error) {
       out["assign"] = { ok: false, ms: Date.now() - started, detail: error instanceof Error ? error.message.slice(0, 400) : String(error) };
+    }
+  }
+  // A voice note like WhatsApp sends (Ogg/Opus), heard against a product list.
+  if (new URL(request.url).searchParams.get("voice") === "1") {
+    const started = Date.now();
+    try {
+      const ogg = await readFile(path.join(process.cwd(), "public", "selftest", "voice.ogg"));
+      const heard = await understandVoice(ogg.toString("base64"), "ogg", [
+        { name: "Nido 1+ 400 g", brand: "Nestlé", unit: "tin", stock: 8, price: 3500 },
+        { name: "NAN Comfort 1", brand: "Nestlé", unit: "tin", stock: 4, price: 7500 },
+        { name: "France Lait 2", brand: "France Lait", unit: "tin", stock: 5, price: null },
+        { name: "Lait Broli", brand: "Broli", unit: "tin", stock: 15, price: 650 },
+      ]);
+      out["voice"] = { ok: true, ms: Date.now() - started, ...heard };
+    } catch (error) {
+      out["voice"] = { ok: false, ms: Date.now() - started, detail: error instanceof Error ? error.message.slice(0, 400) : String(error) };
     }
   }
   if (providerConfigured("fireworks")) {

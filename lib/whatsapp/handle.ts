@@ -1,5 +1,6 @@
 import { BUCKET, db, publicUrl, type ProductRow, type ShopRow } from "../db/server";
-import { createShop, formatMoney, shopProducts } from "../shop/service";
+import { createShop, deliverOrder, findOrder, formatMoney, listOrders, shopProducts } from "../shop/service";
+import { understandVoice } from "./voice";
 import { downloadMedia, markRead, sendText, type InboundMessage } from "./client";
 import { SAY, parseCommand, pickProduct } from "./commands";
 
@@ -33,6 +34,10 @@ export async function handleMessage(msg: InboundMessage): Promise<void> {
     if (!shop) return sendText(msg.from, SAY.fr.noShop);
     return handleVideo(shop, msg);
   }
+  if (msg.type === "audio" && msg.media) {
+    if (!shop) return sendText(msg.from, SAY.fr.noShop);
+    return handleVoice(shop, msg);
+  }
   if (msg.type !== "text") {
     if (!shop) return sendText(msg.from, SAY.fr.welcome);
     return sendText(msg.from, say.notVideo);
@@ -59,29 +64,78 @@ export async function handleMessage(msg: InboundMessage): Promise<void> {
     case "price": {
       const products = await shopProducts(shop.id);
       if (products.length === 0) return sendText(msg.from, say.noProducts);
-      const product = pickProduct(products, command.product);
-      if (!product) return sendText(msg.from, say.noMatch(command.product));
-      const patch: Partial<ProductRow> =
-        command.kind === "stock"
-          ? { stock: Math.max(0, Math.min(100_000, Math.round(command.value))) }
-          : { price: Math.max(1, Math.round(command.value)), published: product.needs_check.length === 0 };
-      await client.from("boutik_products").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", product.id);
-      await client.from("boutik_corrections").insert({
-        shop_id: shop.id,
-        product_id: product.id,
-        catalog_id: product.catalog_id,
-        field: command.kind === "stock" ? "count" : "price",
-        machine: { value: command.kind === "stock" ? product.stock : product.price, source: "whatsapp" },
-        human: { value: command.value },
-      });
-      return sendText(
-        msg.from,
-        command.kind === "stock" ? say.stockSet(product.name, patch.stock as number) : say.priceSet(product.name, formatMoney(patch.price as number, product.currency)),
-      );
+      const line = await applyUpdate(shop, products, command.product, command.kind, command.value, "whatsapp");
+      return sendText(msg.from, line);
+    }
+    case "orders": {
+      const orders = await listOrders(shop.id, "new");
+      if (orders.length === 0) return sendText(msg.from, say.noOrders);
+      const lines = orders.slice(0, 10).map((o) => `• #${o.id.slice(0, 8)} — ${o.items.map((l) => `${l.qty} × ${l.name}`).join(", ")} — ${formatMoney(o.total, o.currency)}${o.buyer_name ? ` (${o.buyer_name})` : ""}`);
+      return sendText(msg.from, say.orders(lines));
+    }
+    case "delivered": {
+      const order = await findOrder(shop.id, command.ref);
+      if (!order) return sendText(msg.from, say.noSuchOrder);
+      const { stock } = await deliverOrder(order);
+      return sendText(msg.from, say.delivered(order.id.slice(0, 8), stock.map((s) => `• ${s.name} : ${s.left}`)));
     }
     default:
       return sendText(msg.from, say.help);
   }
+}
+
+/** One stock or price change, recorded as a correction; returns the line to say back. */
+async function applyUpdate(
+  shop: ShopRow,
+  products: ProductRow[],
+  query: string,
+  field: "stock" | "price",
+  value: number,
+  source: string,
+): Promise<string> {
+  const say = SAY[shop.language];
+  const product = pickProduct(products, query);
+  if (!product) return say.noMatch(query);
+  const patch: Partial<ProductRow> =
+    field === "stock"
+      ? { stock: Math.max(0, Math.min(100_000, Math.round(value))) }
+      : { price: Math.max(1, Math.round(value)), published: product.needs_check.length === 0 };
+  const client = db();
+  await client.from("boutik_products").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", product.id);
+  await client.from("boutik_corrections").insert({
+    shop_id: shop.id,
+    product_id: product.id,
+    catalog_id: product.catalog_id,
+    field: field === "stock" ? "count" : "price",
+    machine: { value: field === "stock" ? product.stock : product.price, source },
+    human: { value },
+  });
+  return field === "stock" ? say.stockSet(product.name, patch.stock as number) : say.priceSet(product.name, formatMoney(patch.price as number, product.currency));
+}
+
+/** A voice note: Muse Spark Open hears it against the product list; each change is applied and read back. */
+async function handleVoice(shop: ShopRow, msg: InboundMessage): Promise<void> {
+  const say = SAY[shop.language];
+  const products = await shopProducts(shop.id);
+  if (products.length === 0) return sendText(msg.from, say.noProducts);
+  let media: { bytes: ArrayBuffer; mime: string };
+  try {
+    media = await downloadMedia(msg.media!.id);
+  } catch (e) {
+    console.error("[whatsapp] voice download:", e instanceof Error ? e.message : e);
+    return sendText(msg.from, say.notUnderstood);
+  }
+  const format = media.mime.includes("ogg") || media.mime.includes("opus") ? "ogg" : media.mime.includes("mp4") || media.mime.includes("aac") ? "mp4" : media.mime.includes("mpeg") ? "mp3" : "wav";
+  let heard;
+  try {
+    heard = await understandVoice(Buffer.from(media.bytes).toString("base64"), format, products);
+  } catch {
+    return sendText(msg.from, say.notUnderstood);
+  }
+  if (heard.updates.length === 0) return sendText(msg.from, `${heard.transcript ? say.heard(heard.transcript) + "\n\n" : ""}${say.notUnderstood}`);
+  const lines: string[] = [];
+  for (const u of heard.updates) lines.push(await applyUpdate(shop, products, u.product, u.field, u.value, "whatsapp-voice"));
+  return sendText(msg.from, `${say.heard(heard.transcript)}\n\n${lines.join("\n")}`);
 }
 
 /**

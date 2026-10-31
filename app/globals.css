@@ -18,6 +18,9 @@
   --color-warn: #b45309;
   --color-bad: #b91c1c;
   --color-whatsapp: #25d366;
+  /* The internal lab still names the accent this way. */
+  --color-accent: #002f67;
+  --color-accent-soft: #e8eef7;
   --color-whatsapp-ink: #128c5e;
   --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;

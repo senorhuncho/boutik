@@ -30,6 +30,13 @@ export interface DraftProduct {
   stockHint?: number;
   /** How the stock was arrived at, in the trader's words. */
   stockWhy: string;
+  /**
+   * How the camera counted: across the shelf when the frames were lined up ("tracked" or "panned"),
+   * on single frames ("per-frame", the most seen at once: a floor, not a total), or only the model's guess.
+   */
+  counted: "tracked" | "panned" | "per-frame" | "estimate" | "none";
+  /** Most units seen together on any one frame (per-frame counts), or the counted total. */
+  seenMost?: number;
   price?: number;
   currency: string;
   pricePer: string;
@@ -112,9 +119,16 @@ export function draftProducts(scan: ScanLike, lessons: Record<string, CountLesso
     const entry = catalogItem(catalogId ?? "");
     let stock: number;
     let stockWhy: string;
+    const how: DraftProduct["counted"] =
+      count?.method === "track" ? "tracked" : count?.method === "pan" ? "panned" : seen !== null ? "per-frame" : estimate > 0 ? "estimate" : "none";
     if (seen !== null && seen > 0) {
       stock = seen;
-      stockWhy = `${seen} seen in the video`;
+      stockWhy =
+        how === "per-frame"
+          ? `at most ${seen} at once on single frames`
+          : how === "panned"
+            ? `${seen} counted across the shelf (panned)`
+            : `${seen} counted across the shelf`;
     } else if (seen === 0 && estimate > 0) {
       stock = estimate;
       stockWhy = `none picked out by the counter; the model's estimate`;
@@ -151,6 +165,8 @@ export function draftProducts(scan: ScanLike, lessons: Record<string, CountLesso
       stock,
       stockHint,
       stockWhy,
+      counted: how,
+      seenMost: seen ?? undefined,
       price: price?.amount,
       currency: price?.currency ?? "XAF",
       pricePer: price?.per ?? p.unit,
@@ -175,6 +191,7 @@ export function draftProducts(scan: ScanLike, lessons: Record<string, CountLesso
       unit: price.per && !/^(unit|each|piece|1)$/i.test(price.per) ? price.per : "piece",
       stock: 0,
       stockWhy: "heard, not seen: set the stock",
+      counted: "none",
       price: price.amount,
       currency: price.currency,
       pricePer: price.per,

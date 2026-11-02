@@ -368,7 +368,8 @@ export function ScanFlow({ jobId }: { jobId?: string } = {}) {
             <ol className="mt-8 divide-y divide-[var(--color-line)] border-y border-[var(--color-line)]">
               {[
                 ["Stand one big step back", "Light behind you, the whole shelf in the picture."],
-                ["Move slowly, shelf by shelf", "About five seconds per shelf. Under 90 seconds in all."],
+                ["Sweep each shelf slowly, left to right", "Keep the phone at one height and move it steadily, about five seconds a shelf."],
+                ["Then go over each stack from the top", "Tilt down slowly so the packs behind the front ones show. Under 90 seconds in all."],
                 ["Say each product and its price", "“Nido, trois mille cinq cents.” Boutik listens while it looks."],
               ].map(([title, text], i) => (
                 <li key={title} className="flex gap-4 py-4">
@@ -664,13 +665,16 @@ function ProductRow({ row, onChange }: { row: Row; onChange: (patch: Partial<Row
             <div>
               <span className="mb-1 block text-[12px] font-semibold text-[var(--color-muted)]">In stock</span>
               <Stepper value={row.stock} onChange={(stock) => onChange({ stock })} />
+              {/* The reason is always shown: how the count was made decides how far to trust it. */}
+              <span className="mt-1 block text-[12px] leading-snug text-[var(--color-faint)]">{row.stockWhy}</span>
+              {row.counted === "per-frame" ? (
+                <span className="block text-[12px] leading-snug text-[var(--color-warn)]">Units behind others may be missing. Check the shelf.</span>
+              ) : null}
               {row.stockHint !== undefined && row.stockHint > row.stock ? (
                 <button type="button" className="mt-1 text-[12px] font-semibold text-[var(--color-ink)]" onClick={() => onChange({ stock: row.stockHint as number, stockHint: undefined })}>
-                  Maybe {row.stockHint}
+                  Model says up to {row.stockHint}: use it
                 </button>
-              ) : (
-                <span className="mt-1 block text-[12px] text-[var(--color-faint)]">{row.stockWhy}</span>
-              )}
+              ) : null}
             </div>
             <div>
               <label className="mb-1 block text-[12px] font-semibold text-[var(--color-muted)]" htmlFor={`price-${row.key}`}>

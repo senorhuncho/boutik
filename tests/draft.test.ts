@@ -90,3 +90,38 @@ test("a shop that keeps correcting a product upwards gets the higher estimate as
   assert.equal(lowered?.stock, 6);
   assert.equal(lowered?.stockHint, undefined, "no hint when the trader keeps lowering it");
 });
+
+// The numbers from the stored Oct 31 scan (per-frame counts, no tracking): the trader must see how each count was made.
+const perFrame = {
+  identify: {
+    products: [
+      { name: "Indomie Super Pack noodles", brand: "Indomie", unit: "pack", catalogId: "indomie-super-pack", estimatedCount: 30, countConfidence: "low", marks: [], keywords: [] },
+      { name: "Guigoz 2 follow-up formula 300g", brand: "Nestlé", unit: "carton", catalogId: "guigoz", estimatedCount: 5, countConfidence: "low", marks: [], keywords: [] },
+      { name: "Unihope Baby wipes", brand: "Unihope", unit: "pack", catalogId: "baby-wipes", estimatedCount: 10, countConfidence: "high", marks: [], keywords: [] },
+    ],
+  },
+  prices: { prices: [] },
+  counts: {
+    "0": { state: "done", method: "frame", count: 25, frame: 13 },
+    "1": { state: "done", method: "frame", count: 1, frame: 1 },
+    "2": { state: "done", method: "track", count: 10, frame: 7 },
+  },
+};
+
+test("a per-frame count says how it was made and keeps the model's estimate as the hint", () => {
+  const [indomie, guigoz] = draftProducts(perFrame as never);
+  assert.equal(indomie!.counted, "per-frame");
+  assert.equal(indomie!.stock, 25);
+  assert.equal(indomie!.seenMost, 25);
+  assert.equal(indomie!.stockHint, 30);
+  assert.equal(indomie!.stockWhy, "at most 25 at once on single frames");
+  assert.equal(guigoz!.stock, 1, "the default stays the count the camera saw; the estimate is offered, never applied silently");
+  assert.equal(guigoz!.stockHint, 5);
+});
+
+test("a tracked count is reported as counted across the shelf, with no hint when the model agrees", () => {
+  const [, , wipes] = draftProducts(perFrame as never);
+  assert.equal(wipes!.counted, "tracked");
+  assert.equal(wipes!.stockWhy, "10 counted across the shelf");
+  assert.equal(wipes!.stockHint, undefined);
+});
